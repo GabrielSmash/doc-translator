@@ -1,0 +1,31 @@
+[project]
+name = "doc-translator"
+version = "0.1.0"
+description = "Translate PDF documents while preserving their original layout and formatting"
+readme = "README.md"
+license = "AGPL-3.0-or-later"
+authors = [
+    { name = "Gabriel Oliveira", email = "83726533+GabrielSmash@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "ctranslate2>=4.8.5",
+    "huggingface-hub>=2.4.0",
+    "pymupdf>=2.1",
+    "sentencepiece>=0.2.2",
+]
+
+[project.optional-dependencies]
+gpu = ["nvidia-cublas-cu12"]
+
+[project.scripts]
+doc-translator = "doc_translator:main"
+
+[build-system]
+requires = ["uv_build>=0.10.2,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
