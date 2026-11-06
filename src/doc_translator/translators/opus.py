@@ -8,7 +8,7 @@ from pathlib import Path
 import ctranslate2
 import sentencepiece as spm
 
-from .base import protect, restore
+from .base import Glossary, Unit, UnitTranslation, protect, restore, translate_independently
 
 log = logging.getLogger(__name__)
 
@@ -20,8 +20,17 @@ UNKNOWN = "⁇"  # what SentencePiece decodes unknown tokens to
 
 
 class OpusTranslator:
-    def __init__(self, model_dir: Path, target_token: str, device: str = "auto"):
+    def __init__(
+        self,
+        model_dir: Path,
+        target_token: str,
+        device: str = "auto",
+        glossary: Glossary | None = None,
+    ):
         self.target_token = target_token
+        # Glossary terms are swapped for placeholders: kept as-is or replaced
+        # by their fixed translation after the model runs.
+        self.glossary = glossary
         self.source_sp = spm.SentencePieceProcessor(str(model_dir / "source.spm"))
         self.target_sp = spm.SentencePieceProcessor(str(model_dir / "target.spm"))
         self.model_dir = model_dir
@@ -52,6 +61,9 @@ class OpusTranslator:
                 log.warning("GPU unavailable (%s); falling back to CPU", error)
         self._load("cpu")
 
+    def translate_units(self, units: list[Unit]) -> list[UnitTranslation]:
+        return translate_independently(self.translate, units)
+
     def translate(self, texts: list[str]) -> list[str]:
         # Flatten every text into sentences, translate unique sentences once,
         # then rebuild each text.
@@ -65,7 +77,7 @@ class OpusTranslator:
         # so mostly-uppercase text is translated in lowercase and uppercased back.
         all_caps = [_mostly_uppercase(s) for s in sentences]
         prepared = [s.lower() if caps else s for s, caps in zip(sentences, all_caps)]
-        protected = [protect(s, self._unknown_words(s)) for s in prepared]
+        protected = [protect(s, self._unknown_words(s), self.glossary) for s in prepared]
         decoded = self._run(protected)
 
         translations = []

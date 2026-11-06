@@ -9,7 +9,7 @@ from .align import base_style, paragraph_runs, realign, styled_segments
 from .extract import extract_paragraphs
 from .fonts import FontLibrary
 from .render import TranslatedParagraph, render_page
-from .translators import Translator
+from .translators import Translator, Unit
 
 log = logging.getLogger(__name__)
 
@@ -21,25 +21,20 @@ def translate_pdf(source: Path, destination: Path, translator: Translator) -> No
     paragraphs = [p for page_paragraphs in pages for p in page_paragraphs]
     log.info("%d pages, %d paragraphs", len(doc), len(paragraphs))
 
-    # Everything is sent to the translator in a single call so the backend can
-    # batch and deduplicate across the whole document.
     prepared = []
-    texts: list[str] = []
     for paragraph in paragraphs:
         runs = paragraph_runs(paragraph)
         base = base_style(runs)
-        segments = styled_segments(runs, base)
-        prepared.append((paragraph, base, segments))
-        texts.append(paragraph.text)
-        texts.extend(segment.text.strip() for segment in segments)
+        prepared.append((paragraph, base, styled_segments(runs, base)))
 
-    translations = iter(translator.translate(texts))
+    # The whole document goes in one call, in reading order, so the backend
+    # can batch, deduplicate and use the surrounding text as context.
+    units = [Unit(p.text, [s.text.strip() for s in segments]) for p, _, segments in prepared]
+    results = translator.translate_units(units)
 
     translated: dict[int, TranslatedParagraph] = {}
-    for paragraph, base, segments in prepared:
-        translation = next(translations)
-        segment_translations = [next(translations) for _ in segments]
-        runs = realign(translation, base, segments, segment_translations)
+    for (paragraph, base, segments), result in zip(prepared, results):
+        runs = realign(result.text, base, segments, result.segments)
         translated[id(paragraph)] = TranslatedParagraph(paragraph, runs)
 
     fonts = FontLibrary.from_document(doc, _needed_chars(translated.values()))

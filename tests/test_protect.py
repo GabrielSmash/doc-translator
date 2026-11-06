@@ -21,3 +21,12 @@ def test_numbers_with_separators_are_protected():
     assert originals == ["192.168.1.1", "7.3.7", "(1/2)", "10/100"]
     assert "12." in protected
     assert restore(protected, originals) == text
+
+
+def test_glossary_terms_are_kept_or_replaced():
+    from doc_translator.translators.base import Glossary
+
+    glossary = Glossary(keep=["Community Strings"], terms={"Upgrade Port": "Porta de atualização"})
+    protected, originals = protect("Set the community strings on the Upgrade Port.", glossary=glossary)
+    assert "community" not in protected.lower() and "Upgrade" not in protected
+    assert restore(protected, originals) == "Set the community strings on the Porta de atualização."
