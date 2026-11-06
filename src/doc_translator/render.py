@@ -7,12 +7,10 @@ from dataclasses import dataclass
 import pymupdf
 
 from .align import Run
+from .fonts import FontLibrary
 from .models import Paragraph
 
 log = logging.getLogger(__name__)
-
-SERIF_HINTS = ("times", "serif", "roman", "charis", "georgia", "garamond", "cambria", "tiro")
-MONO_HINTS = ("mono", "courier", "consol", "code")
 
 # Shrink redaction boxes vertically so they don't catch glyphs of the lines
 # right above/below (line bboxes overlap slightly).
@@ -27,11 +25,13 @@ class TranslatedParagraph:
     runs: list[Run]
 
 
-def render_page(page: pymupdf.Page, paragraphs: list[TranslatedParagraph]) -> None:
+def render_page(
+    page: pymupdf.Page, paragraphs: list[TranslatedParagraph], fonts: FontLibrary
+) -> None:
     obstacles = _obstacles(page, paragraphs)
     _remove_original_text(page, paragraphs)
     for paragraph in paragraphs:
-        _insert(page, paragraph, obstacles)
+        _insert(page, paragraph, obstacles, fonts)
 
 
 def _obstacles(page: pymupdf.Page, paragraphs: list[TranslatedParagraph]) -> list[pymupdf.Rect]:
@@ -80,24 +80,32 @@ def _remove_original_text(page: pymupdf.Page, paragraphs: list[TranslatedParagra
         )
 
 
-def _insert(page: pymupdf.Page, paragraph: TranslatedParagraph, obstacles: list[pymupdf.Rect]) -> None:
+def _insert(
+    page: pymupdf.Page,
+    paragraph: TranslatedParagraph,
+    obstacles: list[pymupdf.Rect],
+    fonts: FontLibrary,
+) -> None:
     source = paragraph.source
     rect = _available_rect(page, source, obstacles)
-    body = html.escape(source.prefix) + "".join(_run_html(run) for run in paragraph.runs)
+    body = html.escape(source.prefix) + "".join(_run_html(run, fonts) for run in paragraph.runs)
     html_text = f"<p>{body}</p>"
     # Explicit selectors: the HTML engine's default `p` margins (1em) would
     # win over a `*` rule.
-    css = f"body, p {{ margin: 0; padding: 0; }} p {{ line-height: {_line_height(source)}; }}"
+    css = (
+        f"{fonts.css}\n"
+        f"body, p {{ margin: 0; padding: 0; }} p {{ line-height: {_line_height(source)}; }}"
+    )
 
     # Align the first baseline with the original one. The offset depends on
     # the font metrics used by the HTML engine, so it is measured on a scratch
     # page instead of computed.
-    baseline = _first_baseline(page.rect, rect, html_text, css)
+    baseline = _first_baseline(page.rect, rect, html_text, css, fonts.archive)
     if baseline is not None:
         shift = source.lines[0].spans[0].baseline - baseline
         rect += (0, shift, 0, shift)
 
-    spare_height, scale = page.insert_htmlbox(rect, html_text, css=css)
+    spare_height, scale = page.insert_htmlbox(rect, html_text, css=css, archive=fonts.archive)
     if spare_height < 0:
         log.warning("Page %d: text did not fit in %s", page.number + 1, rect)
     elif scale < 1:
@@ -137,11 +145,15 @@ def _available_rect(
 
 
 def _first_baseline(
-    page_rect: pymupdf.Rect, rect: pymupdf.Rect, html_text: str, css: str
+    page_rect: pymupdf.Rect,
+    rect: pymupdf.Rect,
+    html_text: str,
+    css: str,
+    archive: pymupdf.Archive,
 ) -> float | None:
     scratch = pymupdf.open()
     page = scratch.new_page(width=page_rect.width, height=page_rect.height)
-    page.insert_htmlbox(rect, html_text, css=css)
+    page.insert_htmlbox(rect, html_text, css=css, archive=archive)
     for block in page.get_text("dict")["blocks"]:
         for line in block.get("lines", []):
             for span in line["spans"]:
@@ -149,10 +161,10 @@ def _first_baseline(
     return None
 
 
-def _run_html(run: Run) -> str:
+def _run_html(run: Run, fonts: FontLibrary) -> str:
     style = run.style
     css = [
-        f"font-family: {_font_family(style.font)}",
+        f"font-family: {fonts.family(style.font)}",
         f"font-size: {style.size}px",
         f"color: #{style.color:06x}",
         f"font-weight: {'bold' if style.bold else 'normal'}",
@@ -161,15 +173,6 @@ def _run_html(run: Run) -> str:
     if style.underline:
         css.append("text-decoration: underline")
     return f'<span style="{"; ".join(css)}">{html.escape(run.text)}</span>'
-
-
-def _font_family(font: str) -> str:
-    name = font.lower()
-    if any(hint in name for hint in MONO_HINTS):
-        return "monospace"
-    if any(hint in name for hint in SERIF_HINTS):
-        return "serif"
-    return "sans-serif"
 
 
 def _line_height(paragraph: Paragraph) -> str:

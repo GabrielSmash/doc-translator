@@ -3,10 +3,15 @@ import logging
 import sys
 from pathlib import Path
 
+from huggingface_hub import snapshot_download
+from huggingface_hub.errors import HfHubHTTPError, LocalEntryNotFoundError
+
 from .pipeline import translate_pdf
 from .translators.opus import OpusTranslator
 
-DEFAULT_MODEL_DIR = Path.home() / ".cache" / "doc-translator" / "models" / "opus-mt-en-pt"
+# Conversion of Helsinki-NLP/opus-mt-tc-big-en-pt published by this project
+# (see scripts/convert_model.py).
+MODEL_REPO = "gabrielsmash/opus-mt-tc-big-en-pt-ct2-int8"
 PT_BR_TOKEN = ">>pob<<"
 
 
@@ -18,7 +23,9 @@ def main() -> None:
     parser.add_argument("input", type=Path, help="PDF to translate")
     parser.add_argument("-o", "--output", type=Path, help="default: <input>.pt-BR.pdf")
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
-    parser.add_argument("--model", type=Path, default=DEFAULT_MODEL_DIR, help="CTranslate2 model dir")
+    parser.add_argument(
+        "--model", type=Path, help=f"local CTranslate2 model dir (default: download {MODEL_REPO})"
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -28,13 +35,19 @@ def main() -> None:
 
     if not args.input.is_file():
         sys.exit(f"error: {args.input} not found")
-    if not (args.model / "model.bin").is_file():
-        sys.exit(
-            f"error: translation model not found in {args.model}\n"
-            "Run `python scripts/convert_model.py` to create it."
-        )
+    model_dir = args.model or _download_model()
+    if not (model_dir / "model.bin").is_file():
+        sys.exit(f"error: no CTranslate2 model (model.bin) in {model_dir}")
 
     output = args.output or args.input.with_suffix(".pt-BR.pdf")
-    translator = OpusTranslator(args.model, PT_BR_TOKEN, args.device)
+    translator = OpusTranslator(model_dir, PT_BR_TOKEN, args.device)
     translate_pdf(args.input, output, translator)
     print(f"Saved {output}")
+
+
+def _download_model() -> Path:
+    """Fetch the model on first use; later runs reuse the Hugging Face cache."""
+    try:
+        return Path(snapshot_download(MODEL_REPO))
+    except (HfHubHTTPError, LocalEntryNotFoundError) as error:
+        sys.exit(f"error: could not download the model {MODEL_REPO}: {error}")

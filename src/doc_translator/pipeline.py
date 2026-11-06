@@ -7,6 +7,7 @@ import pymupdf
 
 from .align import base_style, paragraph_runs, realign, styled_segments
 from .extract import extract_paragraphs
+from .fonts import FontLibrary
 from .render import TranslatedParagraph, render_page
 from .translators import Translator
 
@@ -41,8 +42,21 @@ def translate_pdf(source: Path, destination: Path, translator: Translator) -> No
         runs = realign(translation, base, segments, segment_translations)
         translated[id(paragraph)] = TranslatedParagraph(paragraph, runs)
 
+    fonts = FontLibrary.from_document(doc, _needed_chars(translated.values()))
+
     for page, page_paragraphs in zip(doc, pages):
-        render_page(page, [translated[id(p)] for p in page_paragraphs])
+        render_page(page, [translated[id(p)] for p in page_paragraphs], fonts)
 
     doc.subset_fonts()
     doc.save(destination, garbage=3, deflate=True)
+
+
+def _needed_chars(paragraphs) -> dict[str, set[str]]:
+    """Characters each font must be able to draw in the translated document."""
+    needed: dict[str, set[str]] = {}
+    for paragraph in paragraphs:
+        first_font = paragraph.source.spans[0].font
+        needed.setdefault(first_font, set()).update(paragraph.source.prefix)
+        for run in paragraph.runs:
+            needed.setdefault(run.style.font, set()).update(run.text)
+    return needed
