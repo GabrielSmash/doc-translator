@@ -2,13 +2,14 @@
 
 import html
 import logging
+import re
 from dataclasses import dataclass
 
 import pymupdf
 
 from .align import Run
-from .fonts import FontLibrary
-from .models import Paragraph
+from .fonts import FontLibrary, generic_family
+from .models import Leader, Paragraph
 
 log = logging.getLogger(__name__)
 
@@ -17,6 +18,12 @@ log = logging.getLogger(__name__)
 REDACT_INSET = 0.2
 # Minimum distance kept between the grown text box and the next element.
 GAP = 2.0
+# Built-in PDF fonts used to draw TOC leaders and page numbers.
+BASE14 = {
+    "sans-serif": ("helv", "hebo"),
+    "serif": ("tiro", "tibo"),
+    "monospace": ("cour", "cobo"),
+}
 
 
 @dataclass
@@ -88,13 +95,19 @@ def _insert(
 ) -> None:
     source = paragraph.source
     rect = _available_rect(page, source, obstacles)
-    body = html.escape(source.prefix) + "".join(_run_html(run, fonts) for run in paragraph.runs)
+    if source.leader:
+        # Keep room for a few dots and the page number.
+        leader = source.leader
+        rect.x1 = leader.right - _text_width(leader.number, leader) - 4 * leader.size
+    prefix = [Run(source.prefix, paragraph.runs[0].style)] if source.prefix else []
+    body = "".join(_run_html(run, fonts) for run in [*prefix, *paragraph.runs])
     html_text = f"<p>{body}</p>"
     # Explicit selectors: the HTML engine's default `p` margins (1em) would
     # win over a `*` rule.
     css = (
         f"{fonts.css}\n"
-        f"body, p {{ margin: 0; padding: 0; }} p {{ line-height: {_line_height(source)}; }}"
+        f"body, p {{ margin: 0; padding: 0; }} "
+        f"p {{ line-height: {_line_height(source)}; text-align: {source.align}; }}"
     )
 
     # Align the first baseline with the original one. The offset depends on
@@ -112,6 +125,45 @@ def _insert(
         log.debug("Page %d: %r scaled to %.0f%%", page.number + 1, source.text[:30], scale * 100)
 
     _recreate_links(page, rect, paragraph.runs)
+    if source.leader:
+        _draw_leader(page, rect, source.leader)
+
+
+def _draw_leader(page: pymupdf.Page, rect: pymupdf.Rect, leader: Leader) -> None:
+    """Fill the gap between the translated title and the page number with dots."""
+    spans = [
+        span
+        for block in page.get_text("dict", clip=rect)["blocks"]
+        for line in block.get("lines", [])
+        for span in line["spans"]
+        if span["text"].strip()
+    ]
+    if not spans:
+        return
+    baseline = max(span["origin"][1] for span in spans)
+    end = max(span["bbox"][2] for span in spans if abs(span["origin"][1] - baseline) < 1)
+
+    fontname = _base14(leader)
+    color = tuple(((leader.color >> shift) & 0xFF) / 255 for shift in (16, 8, 0))
+    number_x = leader.right - _text_width(leader.number, leader)
+    dot = _text_width(".", leader)
+    count = int((number_x - end) / dot) - 2
+    if count > 0:
+        page.insert_text(
+            (end + dot, baseline), "." * count, fontname=fontname, fontsize=leader.size, color=color
+        )
+    page.insert_text(
+        (number_x, baseline), leader.number, fontname=fontname, fontsize=leader.size, color=color
+    )
+
+
+def _base14(leader: Leader) -> str:
+    regular, bold = BASE14[generic_family(leader.font)]
+    return bold if leader.bold else regular
+
+
+def _text_width(text: str, leader: Leader) -> float:
+    return pymupdf.get_text_length(text, fontname=_base14(leader), fontsize=leader.size)
 
 
 def _available_rect(
@@ -119,23 +171,39 @@ def _available_rect(
 ) -> pymupdf.Rect:
     """Grow the paragraph box into the empty space around it.
 
-    Single-line paragraphs (titles, list items) may grow to the right, since
-    their width says nothing about the column width. Every paragraph may grow
-    downward until the next element.
+    Single-line paragraphs (titles, list items) may grow sideways, since their
+    width says nothing about the column width: away from the side they are
+    aligned to. Every paragraph may grow downward until the next element.
     """
     rect = pymupdf.Rect(paragraph.bbox)
     others = [o for o in obstacles if not o.contains(rect) and o != paragraph.bbox]
+    # Content area: margins mirrored from the top-left corner, widened to
+    # whatever the page actually uses (margins are often asymmetric).
     left_margin = min((o.x0 for o in obstacles), default=rect.x0)
     top_margin = min((o.y0 for o in obstacles), default=rect.y0)
+    content_right = max([page.rect.x1 - left_margin, *(o.x1 for o in obstacles)])
+    content_bottom = max([page.rect.y1 - top_margin, *(o.y1 for o in obstacles)])
 
     if len(paragraph.lines) == 1:
-        right = page.rect.x1 - left_margin
-        for o in others:
-            if o.x0 >= rect.x1 - 1 and o.y0 < rect.y1 and o.y1 > rect.y0:
+        same_row = [o for o in others if o.y0 < rect.y1 and o.y1 > rect.y0]
+        right = content_right
+        left = left_margin
+        for o in same_row:
+            if o.x0 >= rect.x1 - 1:
                 right = min(right, o.x0 - GAP)
-        rect.x1 = max(rect.x1, right)
+            if o.x1 <= rect.x0 + 1:
+                left = max(left, o.x1 + GAP)
+        room_right = max(0.0, right - rect.x1)
+        room_left = max(0.0, rect.x0 - left)
+        if paragraph.align == "right":
+            rect.x0 -= room_left
+        elif paragraph.align == "center":
+            rect.x0 -= min(room_left, room_right)
+            rect.x1 += min(room_left, room_right)
+        else:
+            rect.x1 += room_right
 
-    bottom = page.rect.y1 - top_margin
+    bottom = content_bottom
     for o in others:
         is_below = o.y0 > rect.y0 + rect.height / 2
         if is_below and o.x0 < rect.x1 and o.x1 > rect.x0:
@@ -172,7 +240,29 @@ def _run_html(run: Run, fonts: FontLibrary) -> str:
     ]
     if style.underline:
         css.append("text-decoration: underline")
-    return f'<span style="{"; ".join(css)}">{html.escape(run.text)}</span>'
+    if style.superscript:
+        css.append("vertical-align: super")
+    content = (
+        _small_caps_html(run.text, style.size * style.small_caps)
+        if style.small_caps
+        else html.escape(run.text)
+    )
+    return f'<span style="{"; ".join(css)}">{content}</span>'
+
+
+def _small_caps_html(text: str, small_size: float) -> str:
+    """Emulate small caps: words start with a full-size capital, the rest of
+    the letters are capitals at the smaller size. Numbers stay full size."""
+    small = f'<span style="font-size: {small_size:.1f}px">{{}}</span>'
+    parts = []
+    for token in re.split(r"(\s+)", text):
+        if not token.strip() or not token[0].isalpha():
+            parts.append(html.escape(token))
+        elif len(token) > 3 or not parts:
+            parts.append(html.escape(token[0].upper()) + small.format(html.escape(token[1:].upper())))
+        else:
+            parts.append(small.format(html.escape(token.upper())))
+    return "".join(parts)
 
 
 def _line_height(paragraph: Paragraph) -> str:

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import pymupdf
 
 # PyMuPDF span flag bits (see pymupdf.TEXT_FONT_*).
+FLAG_SUPERSCRIPT = 1
 FLAG_ITALIC = 2
 FLAG_BOLD = 16
 
@@ -23,6 +24,9 @@ class Span:
     link: str | None = None
     # PDFs draw underlines as separate vector lines, detected at extraction.
     underline: bool = False
+    # Small caps are drawn as capitals in two sizes ("P" + "ROCEDURES"). Both
+    # spans get the larger size; this keeps the small/large ratio (0 = none).
+    small_caps: float = 0.0
 
     @property
     def bold(self) -> bool:
@@ -31,6 +35,10 @@ class Span:
     @property
     def italic(self) -> bool:
         return bool(self.flags & FLAG_ITALIC)
+
+    @property
+    def superscript(self) -> bool:
+        return bool(self.flags & FLAG_SUPERSCRIPT)
 
 
 @dataclass
@@ -42,16 +50,36 @@ class Line:
     def text(self) -> str:
         return "".join(s.text for s in self.spans)
 
+    @property
+    def baseline(self) -> float:
+        # The largest span sets the baseline; superscripts sit above it.
+        return max(self.spans, key=lambda s: s.size).baseline
+
+
+@dataclass
+class Leader:
+    """Dot leader and page number ending a table-of-contents entry."""
+
+    number: str
+    font: str
+    size: float
+    color: int
+    bold: bool
+    right: float  # x where the page number ends
+
 
 @dataclass
 class Paragraph:
     """A unit of text that is translated as a whole.
 
     `prefix` holds list markers ("•", "1.") that must not be translated.
+    `align` is a CSS text-align value: left, right, center or justify.
     """
 
     lines: list[Line] = field(default_factory=list)
     prefix: str = ""
+    align: str = "left"
+    leader: Leader | None = None
 
     @property
     def bbox(self) -> pymupdf.Rect:

@@ -69,7 +69,7 @@ class FontLibrary:
     def family(self, font_name: str) -> str:
         if family := self._families.get(font_name):
             return family
-        return _generic_family(font_name)
+        return generic_family(font_name)
 
 
 def _embedded_fonts(doc: pymupdf.Document) -> dict[str, int]:
@@ -102,7 +102,7 @@ def _normalize(name: str) -> str:
     return DEFAULT_STYLE_SUFFIX.sub("", compact)
 
 
-def _generic_family(font_name: str) -> str:
+def generic_family(font_name: str) -> str:
     name = font_name.lower()
     if any(hint in name for hint in MONO_HINTS):
         return "monospace"

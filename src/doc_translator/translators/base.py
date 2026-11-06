@@ -8,6 +8,9 @@ from typing import Protocol
 PROTECTED = re.compile(
     r"(?:https?://|www\.)\S+[^\s.,;:!?)]"  # URLs
     r"|[\w.+-]+@[\w-]+(?:\.[\w-]+)+"  # emails
+    # Numbers with separators: IPs, versions, "(1/2)". Besides being
+    # untranslatable, "(1/2)" makes Opus-MT hallucinate whole sentences.
+    r"|\(\d+(?:[./:]\d+)+\)|\b\d+(?:[./:]\d+)+\b"
 )
 PLACEHOLDER = "XURL{}"
 
@@ -18,14 +21,18 @@ class Translator(Protocol):
         ...
 
 
-def protect(text: str) -> tuple[str, list[str]]:
+def protect(text: str, extra: re.Pattern | None = None) -> tuple[str, list[str]]:
+    """Swap URLs, emails and `extra` matches for placeholders."""
     originals: list[str] = []
 
     def replace(match: re.Match) -> str:
         originals.append(match.group(0))
         return PLACEHOLDER.format(len(originals) - 1)
 
-    return PROTECTED.sub(replace, text), originals
+    text = PROTECTED.sub(replace, text)
+    if extra is not None:
+        text = extra.sub(replace, text)
+    return text, originals
 
 
 def restore(text: str, originals: list[str]) -> str:

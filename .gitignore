@@ -2,3 +2,5 @@
 __pycache__/
 *.pt-BR.pdf
 build/
+samples/*
+!samples/sample.pdf

@@ -29,9 +29,9 @@ def main() -> None:
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)s: %(message)s"
-    )
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
+    # Verbose output is about this tool only, not the HTTP/model libraries.
+    logging.getLogger("doc_translator").setLevel(logging.DEBUG if args.verbose else logging.INFO)
 
     if not args.input.is_file():
         sys.exit(f"error: {args.input} not found")

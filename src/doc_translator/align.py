@@ -27,6 +27,8 @@ class Style:
     italic: bool
     link: str | None = None
     underline: bool = False
+    superscript: bool = False
+    small_caps: float = 0.0
 
 
 @dataclass
@@ -51,6 +53,8 @@ def paragraph_runs(paragraph: Paragraph) -> list[Run]:
                 span.italic,
                 span.link,
                 span.underline,
+                span.superscript,
+                round(span.small_caps, 2),
             )
             if runs and runs[-1].style == style:
                 runs[-1].text += text

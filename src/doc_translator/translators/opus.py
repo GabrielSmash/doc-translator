@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 # trained on sentences, so long paragraphs translate better split up.
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[\"'(\[]?[A-Z0-9])")
 BATCH_SIZE = 32
+UNKNOWN = "⁇"  # what SentencePiece decodes unknown tokens to
 
 
 class OpusTranslator:
@@ -24,6 +25,7 @@ class OpusTranslator:
         self.source_sp = spm.SentencePieceProcessor(str(model_dir / "source.spm"))
         self.target_sp = spm.SentencePieceProcessor(str(model_dir / "target.spm"))
         self.model_dir = model_dir
+        self._unknown_cache: dict[str, bool] = {}
         if device == "auto":
             self._load_auto()
         else:
@@ -59,18 +61,58 @@ class OpusTranslator:
         return [" ".join(translated.get(s, s) for s in sentences) for sentences in split]
 
     def _translate_sentences(self, sentences: list[str]) -> list[str]:
-        protected = [protect(s) for s in sentences]
+        # The target vocabulary lacks some uppercase accented letters ("Ã"),
+        # so mostly-uppercase text is translated in lowercase and uppercased back.
+        all_caps = [_mostly_uppercase(s) for s in sentences]
+        prepared = [s.lower() if caps else s for s, caps in zip(sentences, all_caps)]
+        protected = [protect(s, self._unknown_words(s)) for s in prepared]
+        decoded = self._run(protected)
+
+        translations = []
+        for text, caps, source in zip(decoded, all_caps, sentences):
+            if UNKNOWN in text:
+                log.warning("Untranslatable characters in %r; keeping the original", source[:40])
+                translations.append(source)
+            else:
+                translations.append(text.upper() if caps else text)
+        return translations
+
+    def _run(self, protected: list[tuple[str, list[str]]]) -> list[str]:
         tokens = [
             [self.target_token, *self.source_sp.encode(text, out_type=str), "</s>"]
             for text, _ in protected
         ]
+        # disable_unk: the target vocabulary lacks a few characters (e.g. "À"),
+        # so make the model pick another wording instead of emitting "⁇".
         results = self.model.translate_batch(
-            tokens, beam_size=4, max_batch_size=BATCH_SIZE
+            tokens, beam_size=4, max_batch_size=BATCH_SIZE, disable_unk=True
         )
         return [
             restore(self.target_sp.decode(result.hypotheses[0]), originals)
             for result, (_, originals) in zip(results, protected)
         ]
+
+    def _unknown_words(self, text: str) -> re.Pattern | None:
+        """Words holding characters the model can't read ("VistaLINK®", "<Enter>").
+
+        They are kept as-is instead of being translated into garbage.
+        """
+        unknown = {c for c in set(text) if not c.isspace() and self._is_unknown(c)}
+        if not unknown:
+            return None
+        chars = "".join(re.escape(c) for c in unknown)
+        return re.compile(rf"[^\s{chars}]*[{chars}][^\s]*")
+
+    def _is_unknown(self, char: str) -> bool:
+        if char not in self._unknown_cache:
+            ids = self.source_sp.encode(char)
+            self._unknown_cache[char] = self.source_sp.unk_id() in ids
+        return self._unknown_cache[char]
+
+
+def _mostly_uppercase(text: str) -> bool:
+    letters = [c for c in text if c.isalpha()]
+    return len(letters) > 1 and sum(c.isupper() for c in letters) >= 0.8 * len(letters)
 
 
 def _preload_cuda_libraries() -> None:
