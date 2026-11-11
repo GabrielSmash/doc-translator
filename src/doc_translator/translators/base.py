@@ -2,6 +2,7 @@
 
 import json
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -67,6 +68,21 @@ class Glossary:
         ]
         return "\n".join(lines)
 
+    def violations(self, source: str, translation: str) -> list[str]:
+        """Glossary terms used in `source` but not rendered as decided.
+
+        Translations are compared by word stems so that inflections
+        ("controladores de quadro" for "controlador de quadro") still match.
+        """
+        source_lower, translated = source.lower(), _fold(translation)
+        missing = [t for t in self.keep if t.lower() in source_lower and _fold(t) not in translated]
+        for term, target in self.terms.items():
+            if term.lower() in source_lower and not all(
+                _stem(word) in translated for word in _fold(target).split() if len(word) > 3
+            ):
+                missing.append(term)
+        return missing
+
     def pattern(self) -> re.Pattern | None:
         """Regex matching every glossary term, longest first."""
         words = sorted([*self.keep, *self.terms], key=len, reverse=True)
@@ -82,6 +98,16 @@ class Glossary:
             if source.lower() == term.lower():
                 return target
         return term
+
+
+def _fold(text: str) -> str:
+    """Lowercase without accents."""
+    decomposed = unicodedata.normalize("NFKD", text.lower())
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
+def _stem(word: str) -> str:
+    return word[: max(4, len(word) - 3)]
 
 
 class Translator(Protocol):

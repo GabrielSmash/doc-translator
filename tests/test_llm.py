@@ -41,7 +41,6 @@ def test_batches_respect_size_limits():
 def test_units_are_batched_with_glossary_and_segments():
     llm = FakeLLM(
         [
-            "KEEP: VistaLINK\nTERM: 7700 => 7700\nnoise line",
             json.dumps({"translations": ["Visão geral", "A placa fornece os principais resultados via VistaLINK."]}),
             json.dumps({"items": [["principais resultados"]]}),
         ],
@@ -62,16 +61,14 @@ def test_units_are_batched_with_glossary_and_segments():
         "12/2026",
     ]
     assert results[1].segments == ["principais resultados"]
-    batch_prompt = llm.prompts[1][1]["content"]
-    assert '"VistaLINK": keep in English' in batch_prompt
-    assert '"Overview" -> "Visão geral"' in batch_prompt  # user glossary merged
-    assert len(llm.prompts) == 3
+    batch_prompt = llm.prompts[0][1]["content"]
+    assert '"Overview" -> "Visão geral"' in batch_prompt  # user glossary used
+    assert len(llm.prompts) == 2  # no recurring terms: no terminology call
 
 
 def test_bad_batch_answer_falls_back_to_one_by_one():
     llm = FakeLLM(
         [
-            "",
             json.dumps({"translations": ["só uma"]}),  # wrong count
             "Visão geral",
             "Destaques",
@@ -107,12 +104,14 @@ def test_case_copied_from_neighbors_is_undone():
         "Visualizando o status do LED"
     )
     assert _match_case("OVERVIEW", "Visão geral") == "VISÃO GERAL"
+    assert _match_case("7700FC Frame Controller", "controlador de quadro 7700FC") == (
+        "Controlador de quadro 7700FC"
+    )
 
 
 def test_number_mismatch_triggers_single_retry():
     llm = FakeLLM(
         [
-            "",
             json.dumps({"translations": ["Porta serial RS-230"]}),
             "Porta serial RS-232",
         ]
@@ -120,17 +119,33 @@ def test_number_mismatch_triggers_single_retry():
     results = llm.translate_units([Unit("RS-232 serial port")])
     assert results[0].text == "Porta serial RS-232"
     # Numbers are listed in the system message, never next to the text.
-    assert "232" in llm.prompts[2][0]["content"]
-    assert "unchanged" not in llm.prompts[2][1]["content"]
+    assert "232" in llm.prompts[1][0]["content"]
+    assert "unchanged" not in llm.prompts[1][1]["content"]
 
 
-def test_glossary_lines_are_parsed_and_contradictions_dropped():
+PROSE = [
+    "Connect the Frame Controller to the network before you open the Network Setup menu.",
+    "The Frame Controller reboots when the Network Setup values are saved to memory.",
+]
+
+
+def test_terminology_is_decided_once_for_recurring_terms():
+    llm = FakeLLM(["- Frame Controller => controlador de quadro\nNetwork Setup => KEEP\nOther => x"])
+    glossary = llm._build_glossary([Unit(t) for t in PROSE])
+    assert glossary.keep == ["Network Setup"]
+    assert glossary.terms == {"Frame Controller": "controlador de quadro"}
+    assert "Frame Controller" in llm.prompts[0][0]["content"]
+
+
+def test_terminology_violation_triggers_retry():
+    glossary = Glossary(terms={"Frame Controller": "controlador de quadro"})
     llm = FakeLLM(
         [
-            "Here is the glossary:\nKEEP: SNMP\n- TERM: Upgrade Port => Porta de atualização\n"
-            "KEEP: upgrade\nTERM: upgrade => atualização\nTERM: \"Tables\" => \"Tabelas\""
-        ]
+            json.dumps({"translations": ["Reinicie o Frame Controller."]}),
+            "Reinicie o controlador de quadro.",
+        ],
+        glossary=glossary,
     )
-    glossary = llm._build_glossary([Unit("Some text")])
-    assert glossary.keep == ["SNMP"]
-    assert glossary.terms == {"Upgrade Port": "Porta de atualização", "Tables": "Tabelas"}
+    results = llm.translate_units([Unit("Restart the Frame Controller.")])
+    assert results[0].text == "Reinicie o controlador de quadro."
+    assert "Mandatory terminology" in llm.prompts[1][0]["content"]

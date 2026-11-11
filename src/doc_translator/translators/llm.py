@@ -18,14 +18,14 @@ import re
 import urllib.error
 import urllib.request
 
+from ..terms import quoted_terms, recurring_terms
 from .base import Glossary, Unit, UnitTranslation
 
 log = logging.getLogger(__name__)
 
 DEFAULT_HOST = "http://localhost:11434"
 CONTEXT_UNITS = 2  # preceding paragraphs shown as context
-GLOSSARY_SAMPLE_CHARS = 6000
-GLOSSARY_MAX_ENTRIES = 20  # per list
+EXAMPLE_CHARS = 160  # usage example shown with each glossary term
 # Batches trade prompt overhead (instructions/context repeated per call)
 # against the cost of a bad answer, which sends the whole batch to retry.
 BATCH_CHARS = 1500
@@ -50,20 +50,23 @@ uppercase stays uppercase."""
 
 # Plain lines rather than a JSON schema: with some documents, schema-constrained
 # decoding made the model emit whitespace until the token limit.
-GLOSSARY_PROMPT = f"""Below is an excerpt of a technical document in English that \
-will be translated into Brazilian Portuguese. Build a short glossary for the translator:
-- terms that must stay in English (product names, protocol terms, UI labels, \
-acronyms that Brazilian professionals don't translate), one per line as:
-KEEP: <term>
-- domain terms whose correct Brazilian Portuguese translation depends on the \
-field, one per line as:
-TERM: <English term> => <Portuguese translation>
-At most {GLOSSARY_MAX_ENTRIES} lines of each kind. Skip plain numbers and model \
-codes. Output only these lines.
+TERMS_PROMPT = """These terms recur in a technical document being translated \
+from English into Brazilian Portuguese. Decide how each one must be written \
+everywhere in the translation, so the terminology stays consistent.
+Translate by default. Answer KEEP only for: product and brand names, names of \
+screens, menus, buttons or options shown by the software (in English), and \
+technical terms Brazilian professionals really use in English. Capital letters \
+alone do not make a name.
+Answer one line per term, in the same order, exactly as in these examples:
+Power Supply => fonte de alimentação
+Rear Panel => painel traseiro
+Safety Guidelines => diretrizes de segurança
+Network Setup => KEEP
+Boot Loader => KEEP
 
-Document excerpt:
-{{sample}}"""
-GLOSSARY_LINE = re.compile(r"^\s*[-*]?\s*(KEEP|TERM)\s*:\s*(.+?)\s*$", re.IGNORECASE)
+Terms, each with an example of use:
+{terms}"""
+TERM_LINE = re.compile(r"^\s*[-*\d.]*\s*(.+?)\s*=>\s*(.+?)\s*$")
 
 BATCH_PROMPT = """Translate each item of the JSON array below into Brazilian \
 Portuguese. Answer with {{"translations": [...]}}: exactly {count} strings, \
@@ -128,44 +131,42 @@ class LLMTranslator:
     # -- glossary ------------------------------------------------------------
 
     def _build_glossary(self, units: list[Unit]) -> Glossary:
-        sample, size = [], 0
-        for unit in units:
-            if size > GLOSSARY_SAMPLE_CHARS:
-                break
-            sample.append(unit.text)
-            size += len(unit.text)
-        prompt = GLOSSARY_PROMPT.format(sample="\n".join(sample))
+        """Ask the model to decide, once, how each recurring term is rendered."""
+        candidates = recurring_terms([u.text for u in units])
+        if not candidates:
+            return Glossary()
+        listing = "\n".join(
+            f'- {term} (e.g. "{_excerpt(example, term)}")' for term, example in candidates.items()
+        )
         try:
-            answer = self._chat([{"role": "user", "content": prompt}], max_tokens=1024)
+            answer = self._chat(
+                [{"role": "user", "content": TERMS_PROMPT.format(terms=listing)}],
+                max_tokens=64 + 24 * len(candidates),
+            )
         except LLMError as error:
-            log.warning("Could not build a glossary (%s); continuing without one", error)
+            log.warning("Could not decide the terminology (%s); continuing without it", error)
             return Glossary()
 
-        keep: list[str] = []
-        terms: dict[str, str] = {}
+        by_name = {term.lower(): term for term in candidates}
+        glossary = Glossary()
         for line in answer.splitlines():
-            if not (match := GLOSSARY_LINE.match(line)):
+            if not (match := TERM_LINE.match(line)):
                 continue
-            kind, value = match.group(1).upper(), match.group(2).strip("\"'` ")
-            if kind == "KEEP":
-                keep.append(value)
-            elif "=>" in value:
-                source, target = (part.strip("\"'` ") for part in value.split("=>", 1))
-                if source and target:
-                    if source == target:
-                        keep.append(source)  # "7700FC => 7700FC" just means keep it
-                    else:
-                        terms[source] = target
-        keep, terms = keep[:GLOSSARY_MAX_ENTRIES], dict(list(terms.items())[:GLOSSARY_MAX_ENTRIES])
-
-        # A term both kept and translated is the model contradicting itself:
-        # drop it and let the translator decide in context.
-        conflicts = {k.lower() for k in keep} & {t.lower() for t in terms}
-        glossary = Glossary(
-            keep=[k for k in dict.fromkeys(keep) if k.lower() not in conflicts],
-            terms={k: v for k, v in terms.items() if k.lower() not in conflicts},
-        )
-        log.info("Glossary: keep %s; terms %s", glossary.keep, glossary.terms)
+            term = by_name.get(match.group(1).strip("\"'`* ").lower())
+            decision = match.group(2).strip("\"'`* ")
+            if not term or not decision:
+                continue  # only terms we asked about
+            if decision.upper() == "KEEP" or decision.lower() == term.lower():
+                glossary.keep.append(term)
+            else:
+                glossary.terms[term] = decision
+        # The model can't reliably tell UI labels from common terms; the
+        # document can: labels are the terms it puts between quotes.
+        for term in quoted_terms([u.text for u in units], list(candidates)):
+            glossary.terms.pop(term, None)
+            if term not in glossary.keep:
+                glossary.keep.append(term)
+        log.info("Terminology: keep %s; translate %s", glossary.keep, glossary.terms)
         return glossary
 
     # -- translation ---------------------------------------------------------
@@ -190,7 +191,7 @@ class LLMTranslator:
         results = []
         for index, (text, translation) in enumerate(zip(texts, translations)):
             translation = _match_case(text, _clean(translation, text))
-            if _problems(text, translation):
+            if _problems(text, translation, glossary):
                 # Context for a lone retry: whatever preceded it in the batch.
                 previous = (context + texts[:index])[-CONTEXT_UNITS:]
                 translation = self._translate_one(text, previous, glossary)
@@ -199,6 +200,8 @@ class LLMTranslator:
 
     def _translate_one(self, text: str, context: list[str], glossary: Glossary) -> str:
         prompt = self._prompt(f"Translate this text:\n{text}", [text], context, glossary)
+        if terms := glossary.relevant(text):
+            prompt[0]["content"] += "\n- Mandatory terminology:\n" + terms
         if numbers := NUMBER.findall(text):
             # In the system message: put next to the text, small models
             # translate the reminder along with it.
@@ -207,7 +210,7 @@ class LLMTranslator:
             )
         translation = _clean(self._chat(prompt, max_tokens=64 + len(text)), text)
         translation = _match_case(text, translation)
-        if problems := _problems(text, translation):
+        if problems := _problems(text, translation, glossary):
             log.warning("Check translation of %r (%s): %r", text[:50], problems, translation[:80])
         return translation or text
 
@@ -367,7 +370,7 @@ def _numbers(text: str) -> set[str]:
     return {re.sub(r"[.,]", "", n) for n in NUMBER.findall(text)}
 
 
-def _problems(source: str, translation: str) -> str:
+def _problems(source: str, translation: str, glossary: Glossary | None = None) -> str:
     """Why a translation can't be trusted, or "" if it looks fine."""
     if not _plausible(source, translation):
         return "empty or unexpected length"
@@ -375,7 +378,16 @@ def _problems(source: str, translation: str) -> str:
     # technical document that is worse than an awkward sentence.
     if missing := _numbers(source) - _numbers(translation):
         return "numbers changed: " + ", ".join(sorted(missing))
+    if glossary and (terms := glossary.violations(source, translation)):
+        return "terminology not followed: " + ", ".join(terms)
     return ""
+
+
+def _excerpt(text: str, term: str) -> str:
+    """A window of `text` around the first occurrence of `term`."""
+    position = text.lower().find(term.lower())
+    start = max(0, position - EXAMPLE_CHARS // 2)
+    return " ".join(text[start : start + EXAMPLE_CHARS].split())
 
 
 def _mostly_upper(text: str) -> bool:
@@ -392,6 +404,12 @@ def _match_case(source: str, translation: str) -> str:
     if _mostly_upper(source):
         return translation.upper()
     if not _mostly_upper(translation):
+        # Glossary renderings are lowercase ("controlador de quadro"); at the
+        # start of a text they must follow the source's capital.
+        first_source = next((c for c in source if c.isalpha()), "")
+        first = next((i for i, c in enumerate(translation) if c.isalpha()), None)
+        if first is not None and first_source.isupper() and translation[first].islower():
+            return translation[:first] + translation[first].upper() + translation[first + 1 :]
         return translation
     acronyms = {w for w in re.findall(r"\w+", source) if len(w) > 1 and w.isupper()}
     source_words = [w for w in re.findall(r"[^\W\d_]+", source) if len(w) > 3]
