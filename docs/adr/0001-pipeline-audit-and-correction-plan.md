@@ -89,6 +89,19 @@ which also covers the structural changes behind these defects.
    the highest regression risk in the plan, and by then it can be tested
    without producing a PDF.
 
+### Found by the harness in phase 0
+
+The measurement harness detects characters left without ink on the rendered
+page, which the audit could not. It found two more problems, both caught by
+the regression tests:
+
+| # | Defect | Evidence |
+|---|---|---|
+| 3 (extended) | Ligature glyphs of reused subset fonts are empty: the HTML engine draws "ﬁ", "ﬀ", "ﬃ", "ﬂ" with them | NIST, untranslated text: 55 blank characters, all ligatures |
+| 10 | White text on a dark fill becomes invisible when the translation wraps outside the fill | Manual pages 17 and 29: the table header "Parameters" falls below the black band, white on white |
+
+Defect 10 joins phase 4, with the other placement work.
+
 ## Consequences
 
 - Each fix has a number to move, measured before and after, on four

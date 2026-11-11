@@ -27,5 +27,10 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "fonttools>=4.68.0",
     "pytest>=9.2.0",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+markers = ["corpus: measures the public corpus (run with --corpus)"]

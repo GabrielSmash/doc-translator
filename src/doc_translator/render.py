@@ -32,13 +32,22 @@ class TranslatedParagraph:
     runs: list[Run]
 
 
+@dataclass
+class Placement:
+    """Where a paragraph was written and how much it had to shrink."""
+
+    paragraph: TranslatedParagraph
+    rect: pymupdf.Rect
+    scale: float  # 1.0 = original font size
+    fitted: bool  # False: the text overflowed the box even when scaled
+
+
 def render_page(
     page: pymupdf.Page, paragraphs: list[TranslatedParagraph], fonts: FontLibrary
-) -> None:
+) -> list[Placement]:
     obstacles = _obstacles(page, paragraphs)
     _remove_original_text(page, paragraphs)
-    for paragraph in paragraphs:
-        _insert(page, paragraph, obstacles, fonts)
+    return [_insert(page, paragraph, obstacles, fonts) for paragraph in paragraphs]
 
 
 def _obstacles(page: pymupdf.Page, paragraphs: list[TranslatedParagraph]) -> list[pymupdf.Rect]:
@@ -92,7 +101,7 @@ def _insert(
     paragraph: TranslatedParagraph,
     obstacles: list[pymupdf.Rect],
     fonts: FontLibrary,
-) -> None:
+) -> Placement:
     source = paragraph.source
     rect = _available_rect(page, source, obstacles)
     if source.leader:
@@ -127,6 +136,7 @@ def _insert(
     _recreate_links(page, rect, paragraph.runs)
     if source.leader:
         _draw_leader(page, rect, source.leader)
+    return Placement(paragraph, rect, scale, fitted=spare_height >= 0)
 
 
 def _draw_leader(page: pymupdf.Page, rect: pymupdf.Rect, leader: Leader) -> None:

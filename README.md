@@ -91,6 +91,28 @@ render   → original text removed, translation written in the same area,
 - Monospaced text (code, terminal output) is not translated.
 - Scanned PDFs (images without text) are not supported.
 
+## Development
+
+```bash
+uv run pytest                    # unit tests and synthetic fixtures (~2 s)
+uv run pytest --corpus           # also the public corpus (downloads ~3.4 MB once)
+uv run python -m tools.measure   # quality metrics per fixture and engine
+uv run python -m tools.measure --corpus --doc my.pdf --engine identity fast
+```
+
+`tools/measure.py` runs the real pipeline and compares its output with the
+original: text coverage, font reduction, characters left without ink, lost
+drawings, links and rotated text, overlaps, layout similarity, file size.
+Besides the real engines it has two that need no model: `identity` (original
+text through the whole pipeline, so any difference is a rendering defect)
+and `pseudo` (accented, ~10% longer text, like a translation).
+
+`tests/baseline.json` stores the current numbers; a test fails when a metric
+gets worse. After an improvement, store the new numbers with
+`uv run python -m tools.measure --fixtures --corpus --update-baseline`.
+Known defects have tests marked `xfail(strict=True)`: when a fix makes one
+pass, remove its marker. See [docs/architecture.md](docs/architecture.md).
+
 ## License
 
 [AGPL-3.0-or-later](LICENSE). The `fast` engine's model is a conversion of
