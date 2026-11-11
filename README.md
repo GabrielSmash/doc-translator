@@ -86,8 +86,10 @@ render   → original text removed, translation written in the same area,
 
 - Portuguese is longer than English: when there is no free space around a
   paragraph, its font is reduced to fit.
-- Subset fonts (the most common case) cannot draw characters the original
-  text didn't use, so a similar generic font is used instead.
+- Subset fonts (the most common case) cannot draw letters the original
+  text didn't use, so a font with the same metrics (Times, Helvetica or
+  Courier) is used instead.
+- Rows of tightly packed tables are drawn slightly smaller than the original.
 - Monospaced text (code, terminal output) is not translated.
 - Scanned PDFs (images without text) are not supported.
 

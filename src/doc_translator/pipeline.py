@@ -2,6 +2,7 @@
 
 import logging
 import time
+from collections import Counter, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -77,7 +78,9 @@ def translate_document(doc: pymupdf.Document, translator: Translator) -> Result:
     by_paragraph = {id(t.source): t for t in result.translated}
 
     with result.timed("fonts"):
-        result.fonts = FontLibrary.from_document(doc, _needed_chars(result.translated))
+        result.fonts = FontLibrary.from_document(
+            doc, _needed_chars(result.translated), _font_flags(paragraphs)
+        )
 
     with result.timed("render"):
         for page, page_paragraphs in zip(doc, result.pages):
@@ -88,7 +91,19 @@ def translate_document(doc: pymupdf.Document, translator: Translator) -> Result:
 
 def save(doc: pymupdf.Document, destination: Path) -> None:
     doc.subset_fonts()
-    doc.save(destination, garbage=3, deflate=True)
+    # garbage=4 also merges duplicate objects: every inserted paragraph adds
+    # its own copy of the same ToUnicode table (675 copies on a 29-page
+    # manual, making the file four times larger).
+    doc.save(destination, garbage=4, deflate=True)
+
+
+def _font_flags(paragraphs: list[Paragraph]) -> dict[str, int]:
+    """The PDF flags of each font, as set on most of its text."""
+    weights: dict[str, Counter[int]] = defaultdict(Counter)
+    for paragraph in paragraphs:
+        for span in paragraph.spans:
+            weights[span.font][span.flags] += len(span.text)
+    return {font: counts.most_common(1)[0][0] for font, counts in weights.items()}
 
 
 def _needed_chars(paragraphs) -> dict[str, set[str]]:

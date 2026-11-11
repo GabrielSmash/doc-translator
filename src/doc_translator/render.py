@@ -63,6 +63,9 @@ def _obstacles(page: pymupdf.Page, paragraphs: list[TranslatedParagraph]) -> lis
 
 
 def _remove_original_text(page: pymupdf.Page, paragraphs: list[TranslatedParagraph]) -> None:
+    # Read before any redaction: span.underline_drawings index this list.
+    drawings = page.get_drawings()
+
     # Links over translated text are recreated at the new text position.
     text_area = [p.source.bbox for p in paragraphs]
     for link in page.get_links():
@@ -80,20 +83,40 @@ def _remove_original_text(page: pymupdf.Page, paragraphs: list[TranslatedParagra
         text=pymupdf.PDF_REDACT_TEXT_REMOVE,
     )
 
-    # Second pass: drop the vector strokes that underlined the original text.
-    # They are redrawn by CSS under the translated text.
-    underlined = [s for p in paragraphs for s in p.source.spans if s.underline]
-    for span in underlined:
-        zone = pymupdf.Rect(
-            span.bbox.x0 + 1, span.baseline - 0.5, span.bbox.x1 - 1, span.baseline + 0.3 * span.size
-        )
-        page.add_redact_annot(zone)
-    if underlined:
+    # Second pass: drop the drawings that underlined the original text (they
+    # are redrawn by CSS under the translation). Only drawings made of
+    # underlines alone, removed only if entirely inside their zone: removing
+    # whatever a zone touched also erased table rules and fills.
+    underline_drawings = {d for p in paragraphs for s in p.source.spans for d in s.underline_drawings}
+    for index in underline_drawings:
+        page.add_redact_annot(_items_rect(drawings[index]) + (-1.5, -1.5, 1.5, 1.5))
+    if underline_drawings:
         page.apply_redactions(
             images=pymupdf.PDF_REDACT_IMAGE_NONE,
-            graphics=pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_TOUCHED,
+            graphics=pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
             text=pymupdf.PDF_REDACT_TEXT_NONE,
         )
+
+
+def _items_rect(drawing: dict) -> pymupdf.Rect:
+    """Bounds of a drawing's items.
+
+    drawing["rect"] can miss items (for an underline drawn in pieces over two
+    lines it left out the second line), and Rect union can't be used: it
+    skips "empty" rectangles, which every horizontal line is (height 0).
+    """
+    points = []
+    for item in drawing["items"]:
+        if item[0] == "re":
+            points += [item[1].tl, item[1].br]
+        elif item[0] == "qu":
+            points += [item[1].ul, item[1].lr]
+        else:
+            points += [p for p in item[1:] if isinstance(p, pymupdf.Point)]
+    if not points:
+        return pymupdf.Rect(drawing["rect"])
+    xs, ys = [p.x for p in points], [p.y for p in points]
+    return pymupdf.Rect(min(xs), min(ys), max(xs), max(ys))
 
 
 def _insert(

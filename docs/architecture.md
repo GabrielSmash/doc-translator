@@ -156,7 +156,7 @@ src/doc_translator/
 | 3 | Font coverage decided by rendering the character and checking for ink | `pdf/fonts.py` |
 | 2 | Strokes classified by role; a stroke is an underline only when it matches the extent of the text. No removal of line art by touch | `analysis/graphics.py`, `pdf/draw.py` |
 | 1 | Text bounded by baselines and real obstacles, not by neighboring line boxes | `layout.py` |
-| 4 | Fallback family read from the serif and monospace bits of the span flags | `pdf/fonts.py` |
+| 4 | Fallback family from known family names, then the PDF flags (done in phase 1) | `pdf/fonts.py` |
 | 5 | Links saved before redaction; those not recreated are restored | `pdf/draw.py` |
 | 6 | Lines whose direction is not horizontal get action `keep` | `analysis/classify.py` |
 | 7 | Save with `garbage=4` | `pipeline.py` |
@@ -220,10 +220,10 @@ Each phase leaves the tool working and has a number to move.
 | Phase | Work | Done when |
 |---|---|---|
 | 0 ✅ | Harness, fixtures and corpus in the repository; CI | The audit numbers are reproduced by one command |
-| 1 | Defects 3 and 2 (content corruption), 7 and 9 (small) | No blank characters on the NIST report; tables on manual pages 17 and 29 intact |
+| 1 ✅ | Defects 3 and 2 (content corruption), 7 and 9 (small); 4 moved here | No blank characters on the NIST report; tables on manual pages 17 and 29 intact |
 | 2 | Report and CLI summary; per-page isolation; translation cache | A run states what it changed; a layout experiment does not re-translate |
 | 3 | Model with kinds and actions; `extract.py` split | Every line of every corpus page belongs to one block |
-| 4 | `layout.py` separated from drawing; defects 1, 4, 5, 6, 10 | Identity run keeps full size in at least 98% of paragraphs |
+| 4 | `layout.py` separated from drawing; defects 1, 5, 6, 10 | Identity run keeps full size in at least 98% of paragraphs |
 | 5 | Defect 8; `LanguagePair`; PyPI | Styles carried over on the LLM engine match the fast engine |
 
 Phase 0 comes first because every later phase is judged by it. Phase 1 comes

@@ -1,6 +1,8 @@
 """Extract translatable paragraphs, with their styles, from a PDF page."""
 
 import re
+from collections import defaultdict
+from dataclasses import dataclass
 
 import pymupdf
 
@@ -40,56 +42,117 @@ def extract_paragraphs(page: pymupdf.Page) -> list[Paragraph]:
         for link in page.get_links()
         if link.get("uri")
     ]
-    strokes = horizontal_lines(page)
+    drawings = page.get_drawings()
+    strokes = horizontal_lines(drawings)
     data = page.get_text("dict", flags=TEXT_FLAGS)
 
-    paragraphs: list[Paragraph] = []
+    blocks: list[tuple[pymupdf.Rect, list[Line]]] = []
     for block in data["blocks"]:
         if block["type"] != 0:  # 1 = image block
             continue
         lines = [
             line
             for raw in block["lines"]
-            for line in _build_lines(raw, links, strokes)
+            for line in _build_lines(raw, links)
             if line.text.strip() and not _is_code(line)
         ]
         if lines:
-            paragraphs.extend(_split_block(lines, pymupdf.Rect(block["bbox"]), strokes))
+            blocks.append((pymupdf.Rect(block["bbox"]), lines))
+
+    underlines = _mark_underlines([line for _, lines in blocks for line in lines], strokes, drawings)
+    # The other strokes are rules: one between two lines separates them. So
+    # does the edge of a filled area (a table header on a dark band).
+    rules = [stroke.rect for stroke in strokes if stroke not in underlines]
+    rules += _fill_edges(drawings)
+    paragraphs: list[Paragraph] = []
+    for block_rect, lines in blocks:
+        paragraphs.extend(_split_block(lines, block_rect, rules))
     return paragraphs
 
 
-def horizontal_lines(page: pymupdf.Page) -> list[pymupdf.Rect]:
-    """Thin horizontal strokes/rects: candidates for text underlines."""
+@dataclass(frozen=True)
+class Stroke:
+    """A thin horizontal line or rectangle, and where it comes from."""
+
+    rect: pymupdf.Rect
+    drawing: int  # index in page.get_drawings()
+    item: int  # index in that drawing's items
+
+
+def horizontal_lines(drawings: list[dict]) -> list[Stroke]:
+    """Thin horizontal strokes/rects: candidates for underlines and rules."""
     found = []
-    for drawing in page.get_drawings():
-        for item in drawing["items"]:
+    for d, drawing in enumerate(drawings):
+        for i, item in enumerate(drawing["items"]):
             if item[0] == "l":
                 start, end = item[1], item[2]
                 if abs(start.y - end.y) < 0.5:
-                    found.append(pymupdf.Rect(start.x, start.y, end.x, end.y))
+                    found.append(Stroke(pymupdf.Rect(start.x, start.y, end.x, end.y), d, i))
             elif item[0] == "re" and item[1].height < 1.5:
-                found.append(pymupdf.Rect(item[1]))
+                found.append(Stroke(pymupdf.Rect(item[1]), d, i))
     return found
 
 
-def is_underlined(
-    bbox: pymupdf.Rect, baseline: float, size: float, strokes: list[pymupdf.Rect]
-) -> bool:
-    """True if strokes just below the baseline cover most of the span width.
+def _fill_edges(drawings: list[dict]) -> list[pymupdf.Rect]:
+    """Top and bottom edges of filled areas, as zero-height rules."""
+    edges = []
+    for drawing in drawings:
+        if drawing.get("fill") is None:
+            continue
+        for item in drawing["items"]:
+            if item[0] == "re" and item[1].height >= 1.5:
+                box = item[1]
+                edges += [pymupdf.Rect(box.x0, box.y0, box.x1, box.y0), pymupdf.Rect(box.x0, box.y1, box.x1, box.y1)]
+    return edges
 
-    Underlines are often drawn in pieces (one per word), so overlaps add up.
+
+def _mark_underlines(
+    lines: list[Line], strokes: list[Stroke], drawings: list[dict]
+) -> set[Stroke]:
+    """Flag spans drawn with an underline, and the drawings made only of them.
+
+    Returns the strokes taken as underlines.
+
+    An underline sits just below the baseline and stays within its line of
+    text. A table rule sits at the same height but runs past the text to the
+    cell border: taking it for an underline removed every rule of bordered
+    tables, and the header fill with them.
     """
-    covered = 0.0
-    for stroke in strokes:
-        y = (stroke.y0 + stroke.y1) / 2
-        if baseline - 1 <= y <= baseline + 0.3 * size:
-            covered += max(0.0, min(stroke.x1, bbox.x1) - max(stroke.x0, bbox.x0))
-    return covered >= 0.8 * bbox.width
+    accepted: dict[int, set[int]] = defaultdict(set)  # drawing -> items
+    underline_strokes: set[Stroke] = set()
+    underlined: list[tuple[Span, set[int]]] = []
+    for line in lines:
+        for span in line.spans:
+            if not span.text.strip():
+                continue
+            tolerance = 0.5 * span.size
+            covered, used = 0.0, []
+            for stroke in strokes:
+                y = (stroke.rect.y0 + stroke.rect.y1) / 2
+                if not span.baseline - 1 <= y <= span.baseline + 0.3 * span.size:
+                    continue
+                if stroke.rect.x0 < line.bbox.x0 - tolerance or stroke.rect.x1 > line.bbox.x1 + tolerance:
+                    continue  # runs past the text: a rule, not an underline
+                overlap = min(stroke.rect.x1, span.bbox.x1) - max(stroke.rect.x0, span.bbox.x0)
+                if overlap > 0:
+                    covered += overlap
+                    used.append(stroke)
+            # Underlines are often drawn in pieces (one per word): overlaps add up.
+            if covered >= 0.8 * span.bbox.width:
+                span.underline = True
+                for stroke in used:
+                    accepted[stroke.drawing].add(stroke.item)
+                    underline_strokes.add(stroke)
+                underlined.append((span, {stroke.drawing for stroke in used}))
+
+    # Only drawings whose every item is an accepted underline may be removed.
+    pure = {d for d, items in accepted.items() if len(items) == len(drawings[d]["items"])}
+    for span, used in underlined:
+        span.underline_drawings = frozenset(used & pure)
+    return underline_strokes
 
 
-def _build_lines(
-    raw_line: dict, links: list[tuple[pymupdf.Rect, str]], strokes: list[pymupdf.Rect]
-) -> list[Line]:
+def _build_lines(raw_line: dict, links: list[tuple[pymupdf.Rect, str]]) -> list[Line]:
     """Turn a PyMuPDF line into one Line per horizontally separate item."""
     spans = []
     for raw in raw_line["spans"]:
@@ -106,8 +169,6 @@ def _build_lines(
                 bbox=bbox,
                 baseline=raw["origin"][1],
                 link=_find_link(bbox, links),
-                underline=bool(raw["text"].strip())
-                and is_underlined(bbox, raw["origin"][1], raw["size"], strokes),
             )
         )
     _mark_small_caps(spans)
@@ -255,12 +316,21 @@ def _continues(
     return not (ends_sentence and gap > SHORT_LINE_RATIO * block_rect.width)
 
 
-def _rule_between(upper: Line, lower: Line, strokes: list[pymupdf.Rect]) -> bool:
-    top = upper.baseline + 0.3 * max(s.size for s in upper.spans)
-    bottom = lower.bbox.y0 + 0.5 * lower.bbox.height
+def _rule_between(upper: Line, lower: Line, rules: list[pymupdf.Rect]) -> bool:
+    """A rule below the upper line's baseline and above the lower line's
+    letters: the border between two table rows.
+
+    Tight tables put it where an underline would be, so underlines are
+    excluded from `rules` instead. A border spans the line; shorter strokes
+    in that band are something else (the bar of a square root, √dk).
+    """
+    top = upper.baseline
+    bottom = lower.baseline - 0.5 * max(s.size for s in lower.spans)
+    width = lower.bbox.width
     return any(
-        top < (s.y0 + s.y1) / 2 < bottom and s.x0 < lower.bbox.x1 and s.x1 > lower.bbox.x0
-        for s in strokes
+        top < (s.y0 + s.y1) / 2 < bottom
+        and min(s.x1, lower.bbox.x1) - max(s.x0, lower.bbox.x0) >= 0.5 * width
+        for s in rules
     )
 
 

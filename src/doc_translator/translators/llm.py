@@ -20,6 +20,7 @@ import urllib.request
 
 from ..terms import quoted_terms, recurring_terms
 from .base import Glossary, Unit, UnitTranslation
+from .checks import NUMBER, lost_numbers
 
 log = logging.getLogger(__name__)
 
@@ -358,16 +359,9 @@ def _clean(answer: str, source: str) -> str:
     return text
 
 
-NUMBER = re.compile(r"\d+(?:[.,/:]\d+)*")
 # Portuguese words left lowercase in title case.
 MINOR_WORDS = {"a", "o", "as", "os", "e", "de", "da", "do", "das", "dos", "em", "no", "na",
                "nos", "nas", "para", "por", "com", "ao", "aos", "à", "às", "um", "uma"}
-
-
-def _numbers(text: str) -> set[str]:
-    """Digits of each number, ignoring separators: "2.5" and "2,5" (pt-BR
-    decimal comma), "1,000" and "1.000" are the same number."""
-    return {re.sub(r"[.,]", "", n) for n in NUMBER.findall(text)}
 
 
 def _problems(source: str, translation: str, glossary: Glossary | None = None) -> str:
@@ -376,7 +370,7 @@ def _problems(source: str, translation: str, glossary: Glossary | None = None) -
         return "empty or unexpected length"
     # Small models sometimes alter numbers ("RS-232" -> "RS-230"): in a
     # technical document that is worse than an awkward sentence.
-    if missing := _numbers(source) - _numbers(translation):
+    if missing := lost_numbers(source, translation):
         return "numbers changed: " + ", ".join(sorted(missing))
     if glossary and (terms := glossary.violations(source, translation)):
         return "terminology not followed: " + ", ".join(terms)

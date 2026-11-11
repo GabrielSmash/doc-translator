@@ -77,13 +77,41 @@ def defect(number: int, description: str):
     return pytest.mark.xfail(reason=f"defect {number}: {description}", strict=True)
 
 
-@defect(2, "table rules taken as underlines and removed")
 def test_table_rules_are_kept(fixture_paths):
+    """Defect 2, fixed: rules that run past the text are not underlines."""
     assert measured("bordered_table", "identity", fixture_paths)["drawings_lost"] == 0
 
 
-@defect(3, "fonts with empty accented glyphs are reused")
+def test_table_rows_stay_separate(fixture_paths):
+    """With its rules kept, each row of a bordered table is its own paragraph."""
+    import pymupdf
+
+    from doc_translator.extract import extract_paragraphs
+
+    page = pymupdf.open(fixture_paths["bordered_table"])[0]
+    texts = [p.text for p in extract_paragraphs(page)]
+    for label in ("Hostname", "IP Address", "Netmask", "Gateway", "Broadcast"):
+        assert label in texts
+
+
+def test_ligatures_and_symbols_are_drawn(fixture_paths):
+    """Defect 3 (ligatures): no blank glyph, the original font kept, and the
+    text searchable as written ("office", not the ligature "oﬃce")."""
+    import pymupdf
+
+    metrics = measured("blank_ligatures", "identity", fixture_paths)
+    assert metrics["blank_chars"] == 0
+    assert metrics["original_font_chars_pct"] > 90
+
+    from doc_translator.pipeline import translate_document
+
+    doc = pymupdf.open(fixture_paths["blank_ligatures"])
+    translate_document(doc, measure.Identity())
+    assert doc[0].search_for("office") and doc[0].search_for("Find")
+
+
 def test_accented_letters_are_drawn(fixture_paths):
+    """Defect 3, fixed: fonts with empty accented glyphs are no longer reused."""
     assert measured("blank_accents", "pseudo", fixture_paths)["blank_chars"] == 0
 
 
@@ -105,13 +133,25 @@ def test_untranslated_text_keeps_its_size(name):
 
 
 @pytest.mark.corpus
-@defect(3, "ligature glyphs of reused subset fonts are empty")
-def test_ligatures_are_drawn():
+def test_ligatures_are_drawn_on_word_documents():
+    """Defect 3 (ligatures), fixed: ligature codes are removed from reused fonts."""
     assert measured("nist", "identity")["blank_chars"] == 0
 
 
 @pytest.mark.corpus
-@defect(7, "duplicated ToUnicode tables inflate the output")
-@pytest.mark.parametrize("name", [d.name for d in corpus.CORPUS])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "arxiv",
+        "nist",
+        pytest.param(
+            "irs-w4",
+            marks=pytest.mark.xfail(
+                reason="one Form XObject per inserted paragraph (681 tiny paragraphs)", strict=True
+            ),
+        ),
+    ],
+)
 def test_output_is_not_inflated(name):
+    """Defect 7, fixed: duplicate ToUnicode tables are merged on save."""
     assert measured(name, "identity")["size_ratio"] <= 1.5

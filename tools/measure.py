@@ -260,17 +260,23 @@ def _blank_chars(page: pymupdf.Page, dpi: int = 150) -> int:
 
 
 def _overlaps(page: pymupdf.Page) -> int:
-    rects = [
-        pymupdf.Rect(line["bbox"])
-        for block in page.get_text("dict")["blocks"]
-        for line in block.get("lines", [])
-        if "".join(s["text"] for s in line["spans"]).strip()
-    ]
+    """Pairs of text lines that collide.
+
+    Line boxes include room for accents and descenders, so consecutive lines
+    touch in normal text, more so in fonts with tall accented capitals. The
+    middle half of each box is compared instead: that part is ink.
+    """
+    rects = []
+    for block in page.get_text("dict")["blocks"]:
+        for line in block.get("lines", []):
+            if "".join(s["text"] for s in line["spans"]).strip():
+                rect = pymupdf.Rect(line["bbox"])
+                inset = rect.height * 0.25
+                rects.append(rect + (0, inset, 0, -inset))
     count = 0
     for i, a in enumerate(rects):
         for b in rects[i + 1 :]:
-            common = a & b
-            if not common.is_empty and common.get_area() > 0.25 * min(a.get_area(), b.get_area()):
+            if not (a & b).is_empty:
                 count += 1
     return count
 
@@ -319,7 +325,7 @@ def _searchable(output, result) -> dict:
 
 
 def _translation(result) -> dict:
-    from doc_translator.translators.llm import _numbers
+    from doc_translator.translators.checks import lost_numbers
 
     pairs = [
         (u.text, t.text)
@@ -329,7 +335,7 @@ def _translation(result) -> dict:
     ratios = [len(t) / len(s) for s, t in pairs if len(s) >= 15]
     count = max(len(pairs), 1)
     return {
-        "numbers_lost_pct": 100 * sum(bool(_numbers(s) - _numbers(t)) for s, t in pairs) / count,
+        "numbers_lost_pct": 100 * sum(bool(lost_numbers(s, t)) for s, t in pairs) / count,
         "unchanged_pct": 100 * sum(s == t for s, t in pairs) / count,
         "expansion_median": statistics.median(ratios) if ratios else 1.0,
     }

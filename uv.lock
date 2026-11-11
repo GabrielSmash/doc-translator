@@ -80,6 +80,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "ctranslate2" },
+    { name = "fonttools" },
     { name = "huggingface-hub" },
     { name = "pymupdf" },
     { name = "sentencepiece" },
@@ -92,13 +93,13 @@ gpu = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "fonttools" },
     { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "ctranslate2", specifier = ">=4.8.5" },
+    { name = "fonttools", specifier = ">=4.68.0" },
     { name = "huggingface-hub", specifier = ">=2.4.0" },
     { name = "nvidia-cublas-cu12", marker = "extra == 'gpu'" },
     { name = "pymupdf", specifier = ">=2.1" },
@@ -107,10 +108,7 @@ requires-dist = [
 provides-extras = ["gpu"]
 
 [package.metadata.requires-dev]
-dev = [
-    { name = "fonttools", specifier = ">=4.68.0" },
-    { name = "pytest", specifier = ">=9.2.0" },
-]
+dev = [{ name = "pytest", specifier = ">=9.2.0" }]
 
 [[package]]
 name = "filelock"

@@ -24,6 +24,9 @@ class Span:
     link: str | None = None
     # PDFs draw underlines as separate vector lines, detected at extraction.
     underline: bool = False
+    # Indexes (in page.get_drawings()) of drawings made only of this text's
+    # underlines: the renderer removes those and redraws the underline.
+    underline_drawings: frozenset[int] = frozenset()
     # Small caps are drawn as capitals in two sizes ("P" + "ROCEDURES"). Both
     # spans get the larger size; this keeps the small/large ratio (0 = none).
     small_caps: float = 0.0

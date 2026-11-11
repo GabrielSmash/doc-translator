@@ -89,33 +89,68 @@ def rotated_text() -> bytes:
     return doc.tobytes()
 
 
-def blank_accents() -> bytes:
-    """Defect 3: an embedded font whose accented glyphs exist but are empty.
+def _liberation_without(blank, family: str, layout_tables: bool = True) -> bytes:
+    """Liberation Sans with the outlines of the `blank` characters emptied.
 
-    Word subsets fonts this way: the glyph keeps its slot and width, so the
-    coverage check accepts the font, and every accented letter of the
-    translation comes out blank.
+    Their slot and width stay: what Word does to glyphs it leaves out of a
+    subset. Word also drops the layout tables (layout_tables=False): without
+    GSUB, the shaping engine falls back to composing ligatures from the
+    U+FB0x codes of the character map. A modified font may not keep the
+    Reserved Font Name "Liberation" (SIL OFL), so it is renamed.
     """
     from fontTools.ttLib import TTFont
     from fontTools.ttLib.tables._g_l_y_f import Glyph
 
     font = TTFont(str(LIBERATION_SANS))
     for codepoint, name in font.getBestCmap().items():
-        if codepoint > 127 and chr(codepoint).isalpha():
+        if blank(chr(codepoint)):
             font["glyf"][name] = Glyph()  # no contours, advance width kept
-    # A modified font may not keep the Reserved Font Name "Liberation" (OFL).
     for record in font["name"].names:
         if record.nameID in (1, 3, 4, 6, 16):
-            record.string = "WordSubsetTest" if record.nameID != 6 else "WordSubsetTest-Regular"
+            record.string = family if record.nameID != 6 else f"{family}-Regular"
+    if not layout_tables:
+        for table in ("GSUB", "GPOS", "GDEF"):
+            if table in font:
+                del font[table]
     buffer = io.BytesIO()
     font.save(buffer)
+    return buffer.getvalue()
 
+
+def _page_with_font(font: bytes, title: str, body: str) -> bytes:
     doc = pymupdf.open()
     page = doc.new_page(width=A4.width, height=A4.height)
-    page.insert_font(fontname="WordSubset", fontbuffer=buffer.getvalue())
-    page.insert_text((80, 80), "Network Configuration", fontname="WordSubset", fontsize=16)
-    page.insert_textbox(pymupdf.Rect(80, 100, 520, 220), PARAGRAPH, fontname="WordSubset", fontsize=11)
+    page.insert_font(fontname="WordSubset", fontbuffer=font)
+    page.insert_text((80, 80), title, fontname="WordSubset", fontsize=16)
+    page.insert_textbox(pymupdf.Rect(80, 100, 520, 260), body, fontname="WordSubset", fontsize=11)
     return doc.tobytes()
+
+
+def blank_accents() -> bytes:
+    """Defect 3: an embedded font whose accented glyphs exist but are empty.
+
+    Word subsets fonts this way: the glyph keeps its slot and width, so a
+    coverage check that asks the font accepts it, and every accented letter
+    of the translation comes out blank.
+    """
+    font = _liberation_without(lambda c: ord(c) > 127 and c.isalpha(), "WordSubsetTest")
+    return _page_with_font(font, "Network Configuration", PARAGRAPH)
+
+
+def blank_ligatures() -> bytes:
+    """Defect 3, extended: empty ligature and bullet glyphs.
+
+    The HTML engine writes "fi" as the ligature U+FB01 whenever the font maps
+    it, so a reused Word subset printed "o ce" for "office". The bullet is a
+    symbol the fallback font must draw while the rest keeps the original font.
+    """
+    font = _liberation_without(lambda c: c in "\ufb01\ufb02•", "WordLigatureTest", layout_tables=False)
+    body = (
+        "The office staff first configured the flow of traffic.\n"
+        "• Find the official files.\n"
+        "• Fill in the final fields."
+    )
+    return _page_with_font(font, "Office Workflow", body)
 
 
 def internal_links() -> bytes:
@@ -141,6 +176,7 @@ FIXTURES = {
     "bordered_table": bordered_table,
     "rotated_text": rotated_text,
     "blank_accents": blank_accents,
+    "blank_ligatures": blank_ligatures,
     "internal_links": internal_links,
 }
 

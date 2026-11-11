@@ -9,6 +9,7 @@ import ctranslate2
 import sentencepiece as spm
 
 from .base import Glossary, Unit, UnitTranslation, protect, restore, translate_independently
+from .checks import NUMBER, lost_numbers
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +81,19 @@ class OpusTranslator:
         protected = [protect(s, self._unknown_words(s), self.glossary) for s in prepared]
         decoded = self._run(protected)
 
+        # Opus-MT sometimes drops or alters a number. It is deterministic, so
+        # a plain retry repeats the error; it does copy placeholders, so the
+        # sentence is translated again with every number protected. Only
+        # those sentences: placeholders everywhere would cost fluency.
+        retry = [i for i, (s, t) in enumerate(zip(prepared, decoded)) if lost_numbers(s, t)]
+        if retry:
+            reprotected = [protect(prepared[i], self._protect_numbers(prepared[i]), self.glossary) for i in retry]
+            for i, text in zip(retry, self._run(reprotected)):
+                if lost_numbers(prepared[i], text):
+                    log.warning("Numbers changed in %r: %r", prepared[i][:50], text[:60])
+                else:
+                    decoded[i] = text
+
         translations = []
         for text, caps, source in zip(decoded, all_caps, sentences):
             if UNKNOWN in text:
@@ -103,6 +117,11 @@ class OpusTranslator:
             restore(self.target_sp.decode(result.hypotheses[0]), originals)
             for result, (_, originals) in zip(results, protected)
         ]
+
+    def _protect_numbers(self, text: str) -> re.Pattern:
+        """Numbers plus the words _unknown_words() protects."""
+        unknown = self._unknown_words(text)
+        return re.compile(NUMBER.pattern + (f"|{unknown.pattern}" if unknown else ""))
 
     def _unknown_words(self, text: str) -> re.Pattern | None:
         """Words holding characters the model can't read ("VistaLINK®", "<Enter>").

@@ -102,6 +102,42 @@ the regression tests:
 
 Defect 10 joins phase 4, with the other placement work.
 
+### Phase 1 results
+
+| Defect | Status | Measured |
+|---|---|---|
+| 3: blank accented letters | Fixed | NIST with pseudo-translation: 8,941 blank characters to 0. Coverage is decided by drawing each character with the font alone and checking for ink |
+| 3 (extended): blank ligatures | Fixed | NIST untranslated: 53 blank characters to 0, original font kept on 100% of the text (was 94%). fontTools, now a runtime dependency, removes the ligature codes from reused TrueType fonts, plus symbols they can't draw, which the CSS fallback font then draws. Output text is searchable as written ("office", not "oﬃce") |
+| 2: bordered tables | Fixed | Manual pages 17 and 29: 108 and 294 drawings kept (all). A stroke is an underline only if it stays within its line; only drawings made of underlines alone are removed, and only when entirely covered |
+| 4: fallback family | Fixed, moved from phase 4 | Fixing defect 3 sends more text to the fallback font, so a wrong family weighed more. Known family names decide first, then the PDF flags. arXiv with pseudo-translation: full size 63.6% to 72.7%, layout similarity 0.64 to 0.81 |
+| 7: output size | Fixed | Manual 3.87x to 1.55x, arXiv 8.2x to 1.25x, NIST 2.8x to 1.08x |
+| 9: numbers in the fast engine | Fixed | Numbers lost: 0% on the four documents (arXiv was 4.8%) |
+
+Found while fixing:
+
+- The serif fallback was Charis SIL, 10% wider than Times; it is now
+  Nimbus Roman, metric-compatible with Times New Roman.
+- Rules between table cells and the edges of filled areas now separate
+  paragraphs: cells of the manual's tables were merged before. A stroke
+  must span half of the line to count, or the bar of a square root (√dk)
+  split arXiv paragraphs.
+- IRS output stays 3.6x larger for another reason: `insert_htmlbox`
+  creates one Form XObject per paragraph (681 tiny ones). To address in the
+  draw stage, phase 4.
+- Rows of tight tables shrink to 93%: that is defect 1, phase 4. With table
+  cells now separate paragraphs, the manual's share of full-size
+  paragraphs dropped (fast engine 71.3% to 60.6%): the 111 new paragraphs
+  are cells that used to be fused, each now hitting defect 1.
+- Ligatures come from HarfBuzz's fallback shaping: a font without a GSUB
+  table (Word subsets drop it) gets ligatures composed from the U+FB0x
+  codes of its character map. Type 1 and CFF fonts can't be edited; they
+  are reused only if their ligature glyphs are drawn.
+- A symbol a reused font can't draw is taken from MuPDF's fallback chain;
+  for NIST's bullets that embedded Noto Serif whole (59 KB, it isn't
+  subset), raising the output from 1.08x to 1.28x.
+- Seen on NIST, for phase 4: list items lose their hanging indent, and
+  consecutive footnotes are merged into one line.
+
 ## Consequences
 
 - Each fix has a number to move, measured before and after, on four
