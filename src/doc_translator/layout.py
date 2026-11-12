@@ -6,12 +6,14 @@ placement decision can be tested without producing the output PDF.
 """
 
 import html
+import math
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 
 import pymupdf
 
-from .align import Run
+from .align import Run, base_style
 from .analysis.model import Block, Leader
 from .fonts import FontLibrary, generic_family
 
@@ -20,8 +22,18 @@ GAP = 2.0
 # Baselines measured on the scratch page differ from the original ones by
 # rounding; a line within this distance (points) is where it was.
 TOLERANCE = 0.5
-# How much wider than the original a paragraph of several lines may get.
-WIDTH_SLACK = 0.03
+# How much wider than the original a paragraph of several lines may get,
+# into free space: first a little (a replacement font slightly wider than
+# the original), then more before the font is reduced, since a little width
+# is less visible than a smaller font.
+WIDTH_SLACKS = (0.03, 0.10)
+# Reduced sizes are rounded down to steps of this fraction, and paragraphs of
+# one style on a page share the smallest: text of one kind in one size reads
+# as ordered, mixed sizes side by side as a mess.
+SCALE_STEP = 0.05
+# A paragraph needing to shrink below this is reduced on its own, so one
+# tight table cell does not shrink every paragraph of its style.
+SHARED_SCALE_MIN = 0.85
 # Lines starting within this distance (points) of each other are aligned.
 INDENT_TOLERANCE = 2.0
 # Built-in PDF fonts used to draw TOC leaders and page numbers.
@@ -60,7 +72,45 @@ def layout_page(
     """`blocks`: every block of the page, kept ones too; `graphics`: images
     and filled areas. A paragraph must not grow into any of them."""
     obstacles = [Obstacle.of_block(b) for b in blocks] + [Obstacle(g, fill=True) for g in graphics]
-    return [_place(page_rect, p, obstacles, fonts) for p in paragraphs]
+    placements = [_place(page_rect, p, obstacles, fonts) for p in paragraphs]
+    return _harmonize(page_rect, placements, obstacles, fonts)
+
+
+def _harmonize(
+    page_rect: pymupdf.Rect,
+    placements: list[Placement],
+    obstacles: list["Obstacle"],
+    fonts: FontLibrary,
+) -> list[Placement]:
+    """Give the paragraphs of one style on the page one size: the smallest
+    any of them needs, rounded down to a step."""
+    groups: dict[tuple, list[int]] = defaultdict(list)
+    for index, placement in enumerate(placements):
+        groups[_style_key(placement.paragraph)].append(index)
+    for indexes in groups.values():
+        # Less than half a step is a rounding difference with the original
+        # (its text fitted there): that paragraph alone takes it.
+        shared = [i for i in indexes if SHARED_SCALE_MIN <= placements[i].scale < 1 - SCALE_STEP / 2]
+        if not shared:
+            continue
+        size = _step_down(min(placements[i].scale for i in shared))
+        for i in indexes:
+            if placements[i].scale >= SHARED_SCALE_MIN:
+                placements[i] = _place(page_rect, placements[i].paragraph, obstacles, fonts, size)
+    return placements
+
+
+def _style_key(paragraph: TranslatedParagraph) -> tuple:
+    """Text that looks the same: list items and paragraphs of the body text
+    share a key, so a list does not end up larger than the text around it."""
+    if not paragraph.runs:
+        return ()
+    style = base_style(paragraph.runs)
+    return (style.font, style.size, style.bold)
+
+
+def _step_down(scale: float) -> float:
+    return max(SCALE_STEP, math.floor(scale / SCALE_STEP + 1e-6) * SCALE_STEP)
 
 
 def _place(
@@ -68,15 +118,32 @@ def _place(
     paragraph: TranslatedParagraph,
     obstacles: list["Obstacle"],
     fonts: FontLibrary,
+    size: float = 1.0,
+) -> Placement:
+    """`size`: font size to write with, as a fraction of the original."""
+    for slack in WIDTH_SLACKS:
+        placement = _place_in(page_rect, paragraph, obstacles, fonts, size, slack)
+        if placement.scale >= size:
+            break
+    return placement
+
+
+def _place_in(
+    page_rect: pymupdf.Rect,
+    paragraph: TranslatedParagraph,
+    obstacles: list["Obstacle"],
+    fonts: FontLibrary,
+    size: float,
+    slack: float,
 ) -> Placement:
     source = paragraph.source
-    rect = _available_rect(page_rect, source, obstacles)
+    rect = _available_rect(page_rect, source, obstacles, slack)
     if source.leader:
         # Keep room for a few dots and the page number.
         leader = source.leader
         rect.x1 = leader.right - text_width(leader.number, leader) - 4 * leader.size
     prefix = [Run(source.prefix, paragraph.runs[0].style)] if source.prefix else []
-    body = "".join(_run_html(run, fonts) for run in [*prefix, *paragraph.runs])
+    body = "".join(_run_html(run, fonts, size) for run in [*prefix, *paragraph.runs])
     html_text = f"<p>{body}</p>"
     # Explicit selectors: the HTML engine's default `p` margins (1em) would
     # win over a `*` rule.
@@ -94,7 +161,7 @@ def _place(
     tall = pymupdf.Rect(rect.x0, rect.y0, rect.x1, rect.y0 + 3 * page_rect.height)
     measured = _measure(page_rect, tall, html_text, css, fonts.archive)
     if measured is None:  # nothing visible to write
-        return Placement(paragraph, rect, html_text, css, 1.0, fitted=True)
+        return Placement(paragraph, rect, html_text, css, size, fitted=True)
     shift = first_baseline - measured.first_baseline
     top = rect.y0 + shift
     bottom_part = measured.bottom - measured.last_baseline  # descent and leading
@@ -103,11 +170,11 @@ def _place(
 
     rect = pymupdf.Rect(rect.x0, top, rect.x1, max(limit, last_baseline) + bottom_part + GAP)
     if last_baseline <= limit + TOLERANCE:
-        return Placement(paragraph, rect, html_text, css, 1.0, fitted=True)
+        return Placement(paragraph, rect, html_text, css, size, fitted=True)
     # Too long for the room: the HTML engine shrinks it to the allowed height.
     rect.y1 = limit + bottom_part + TOLERANCE
     spare_height, scale = _fit(page_rect, rect, html_text, css, fonts.archive)
-    return Placement(paragraph, rect, html_text, css, scale, fitted=spare_height >= 0)
+    return Placement(paragraph, rect, html_text, css, size * scale, fitted=spare_height >= 0)
 
 
 @dataclass
@@ -237,7 +304,7 @@ def _content_area(
 
 
 def _available_rect(
-    page_rect: pymupdf.Rect, paragraph: Block, obstacles: list[Obstacle]
+    page_rect: pymupdf.Rect, paragraph: Block, obstacles: list[Obstacle], slack: float
 ) -> pymupdf.Rect:
     """Grow the paragraph box sideways into the empty space around it.
 
@@ -267,8 +334,7 @@ def _available_rect(
     room_right = max(0.0, right - rect.x1)
     room_left = max(0.0, rect.x0 - left)
     if len(paragraph.lines) > 1:
-        slack = WIDTH_SLACK * rect.width
-        room_right, room_left = min(room_right, slack), min(room_left, slack)
+        room_right, room_left = min(room_right, slack * rect.width), min(room_left, slack * rect.width)
     if paragraph.align == "right":
         rect.x0 -= room_left
     elif paragraph.align == "center":
@@ -279,11 +345,11 @@ def _available_rect(
     return rect
 
 
-def _run_html(run: Run, fonts: FontLibrary) -> str:
+def _run_html(run: Run, fonts: FontLibrary, size: float = 1.0) -> str:
     style = run.style
     css = [
         f"font-family: {fonts.family(style.font)}",
-        f"font-size: {style.size}px",
+        f"font-size: {style.size * size:.2f}px",
         f"color: #{style.color:06x}",
         f"font-weight: {'bold' if style.bold else 'normal'}",
         f"font-style: {'italic' if style.italic else 'normal'}",
@@ -293,7 +359,7 @@ def _run_html(run: Run, fonts: FontLibrary) -> str:
     if style.superscript:
         css.append("vertical-align: super")
     content = (
-        _small_caps_html(run.text, style.size * style.small_caps)
+        _small_caps_html(run.text, style.size * size * style.small_caps)
         if style.small_caps
         else html.escape(run.text)
     )

@@ -113,7 +113,7 @@ def test_footnotes_are_separate_blocks_with_raised_marks():
 def test_reference_numbers_are_kept_out_of_the_translation():
     page = page_with(
         ("[33] Nitish Srivastava and Geoffrey Hinton. Dropout.", (72, 72), {}),
-        ("as in ByteNet and the models of", (72, 120), {}),
+        ("as in ByteNet, the Extended Neural GPU and the models of", (72, 120), {}),
         ("[16] and ConvS2S, all of which use convolution.", (72, 132), {}),
         ("[2] ", (72, 300), {}),  # number alone in a table cell
     )
@@ -124,3 +124,24 @@ def test_reference_numbers_are_kept_out_of_the_translation():
     # A citation starting a line of running text stays in its paragraph.
     running = next(b for b in blocks if "ByteNet" in b.text)
     assert "[16] and ConvS2S" in running.text and running.prefix == ""
+
+
+def test_lines_ended_by_hand_are_not_joined():
+    page = page_with(
+        ("**** Main Menu ****", (72, 72), {}),
+        ("<1> Network Setup", (72, 84), {}),
+        ("<X> Exit without saving to flash", (72, 96), {}),
+        ("Choose one of the menu choices with the letter or number on", (72, 140), {}),
+        ("the left and press Enter.", (72, 152), {}),
+        # A two-line header, right-aligned.
+        ("7700 MultiFrame Manual", (500 - pymupdf.get_text_length("7700 MultiFrame Manual", fontsize=11), 300), {}),
+        (
+            "7700FC VistaLINK Frame Controller",
+            (500 - pymupdf.get_text_length("7700FC VistaLINK Frame Controller", fontsize=11), 312),
+            {},
+        ),
+    )
+    texts = [b.text for b in analyze_page(page)]
+    assert "<1> Network Setup" in texts and "**** Main Menu ****" in texts
+    assert "Choose one of the menu choices with the letter or number on the left and press Enter." in texts
+    assert "7700 MultiFrame Manual" in texts

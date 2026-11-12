@@ -84,11 +84,18 @@ def _span(raw: dict, text: str, bbox: pymupdf.Rect) -> Span:
     )
 
 
-def graphic_areas(page: pymupdf.Page) -> list[pymupdf.Rect]:
-    """Images and filled areas: places translated text must not grow into.
+# Vertical rules at least this long (points) bound text growing sideways.
+MIN_COLUMN_RULE = 8.0
 
-    Drawings made only of strokes (rules, borders) are left out: text sits
-    between them, and line art is checked separately when grouping lines.
+
+def graphic_areas(page: pymupdf.Page) -> list[pymupdf.Rect]:
+    """Images, filled areas and column rules: places translated text must
+    not grow into.
+
+    Other drawings made only of strokes (horizontal rules, underlines) are
+    left out: text sits between them, and line art is checked separately
+    when grouping lines. Vertical rules are kept: they separate the columns
+    of a table or form, and text growing sideways must stop at them.
     """
     rects = [pymupdf.Rect(info["bbox"]) for info in page.get_image_info()]
     for drawing in page.get_drawings():
@@ -96,4 +103,20 @@ def graphic_areas(page: pymupdf.Page) -> list[pymupdf.Rect]:
         only_strokes = all(item[0] == "l" for item in drawing["items"])
         if not only_strokes and rect.height >= 1.5 and rect.width >= 1.5:
             rects.append(rect)
+        rects += _column_rules(drawing)
     return rects
+
+
+def _column_rules(drawing: dict) -> list[pymupdf.Rect]:
+    rules = []
+    for item in drawing["items"]:
+        if item[0] == "l":
+            start, end = item[1], item[2]
+            if abs(start.x - end.x) < 1 and abs(start.y - end.y) >= MIN_COLUMN_RULE:
+                x = (start.x + end.x) / 2
+                rules.append(pymupdf.Rect(x - 0.5, min(start.y, end.y), x + 0.5, max(start.y, end.y)))
+        elif item[0] == "re":
+            rect = pymupdf.Rect(item[1])
+            if rect.width < 1.5 and rect.height >= MIN_COLUMN_RULE:
+                rules.append(rect)
+    return rules

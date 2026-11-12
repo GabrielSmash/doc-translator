@@ -30,6 +30,13 @@ MAX_LINE_SPACING = 1.8
 # A line ending this far (fraction of block width) before the block's right
 # edge, after sentence-final punctuation, is treated as a paragraph end.
 SHORT_LINE_RATIO = 0.15
+# Words separated by 3+ spaces: columns aligned by hand ("Date   : Jul 17").
+# Prose has at most two (after a period).
+ALIGNED_COLUMNS = re.compile(r"\S {3,}\S")
+# Width of a space, in font sizes, when testing whether a word would fit.
+HAND_BREAK_SPACE = 0.3
+# Room on the left, in font sizes, beyond any first-line indent.
+HAND_BREAK_LEFT = 4.0
 
 
 def split_block(
@@ -72,7 +79,7 @@ def split_block(
                     p
                     for p in reversed(paragraphs)
                     # A TOC entry ends at its page number.
-                    if p.leader is None and _continues(p.lines[-1], line, block_rect, rules)
+                    if p.leader is None and _continues(p.lines[-1], line, block_rect, rules, lines)
                 ),
                 None,
             )
@@ -117,7 +124,11 @@ def _is_marker_only(line: Line) -> bool:
 
 
 def _continues(
-    previous: Line, line: Line, block_rect: pymupdf.Rect, rules: list[pymupdf.Rect]
+    previous: Line,
+    line: Line,
+    block_rect: pymupdf.Rect,
+    rules: list[pymupdf.Rect],
+    lines: list[Line],
 ) -> bool:
     """Is `line` the next line of the paragraph ending with `previous`?"""
     size = max(s.size for s in previous.spans)
@@ -132,9 +143,60 @@ def _continues(
         return False
     if _rule_between(previous, line, rules):
         return False  # e.g. the border between two table rows
+    if _broken_by_hand(previous, line, lines):
+        return False  # menu and terminal lines, two-line headers, notes
     ends_sentence = previous.text.rstrip().endswith((".", "!", "?", ":"))
     gap = block_rect.x1 - previous.bbox.x1
     return not (ends_sentence and gap > SHORT_LINE_RATIO * block_rect.width)
+
+
+def _broken_by_hand(previous: Line, line: Line, lines: list[Line]) -> bool:
+    """Would the first word of `line` have fit at the end of `previous`?
+
+    Text wraps only when the next word does not fit; if it would have, the
+    line was ended on purpose (menu and terminal lines, two-line headers, a
+    note after a list item). The room is measured against the other lines of
+    the column. The word is measured in Helvetica, wider than most text
+    fonts, so that justified text (whose line breaks are not greedy) is not
+    split by an underestimate.
+    """
+    if ALIGNED_COLUMNS.search(previous.text) or ALIGNED_COLUMNS.search(line.text):
+        return True  # columns lined up with spaces: terminal output, a screen
+    words = line.text.split()
+    span = next((s for s in line.spans if s.text.strip()), None)
+    if not words or span is None:
+        return False
+    fontname = "hebo" if span.bold else "helv"
+    needed = pymupdf.get_text_length(words[0], fontname=fontname, fontsize=span.size)
+    needed += HAND_BREAK_SPACE * span.size
+    # Lines of the same column, near these two: a wider row elsewhere in the
+    # block (a table heading) says nothing about this paragraph's width.
+    reach = MAX_LINE_SPACING * span.size
+    column = [
+        l
+        for l in lines
+        if l.bbox.x0 < previous.bbox.x1
+        and l.bbox.x1 > previous.bbox.x0
+        and previous.baseline - reach <= l.baseline <= line.baseline + reach
+    ]
+    # Room taken by something else on the same line (a run-in heading, the
+    # next table cell) is not room.
+    beside = [l for l in lines if l is not previous and abs(l.baseline - previous.baseline) < ALIGN_TOLERANCE]
+    right_room = max(l.bbox.x1 for l in column) - previous.bbox.x1
+    if any(l.bbox.x0 >= previous.bbox.x1 - ALIGN_TOLERANCE for l in beside):
+        right_room = 0
+    if right_room - ALIGN_TOLERANCE >= needed:
+        return True
+    # Right-aligned or centered lines leave their room on the left. A first-
+    # line indent does too, so only a room well beyond an indent counts.
+    right_aligned = abs(previous.bbox.x1 - line.bbox.x1) < ALIGN_TOLERANCE
+    centered = abs((previous.bbox.x0 + previous.bbox.x1) - (line.bbox.x0 + line.bbox.x1)) < 2 * ALIGN_TOLERANCE
+    left_room = previous.bbox.x0 - min(l.bbox.x0 for l in column)
+    if not (right_aligned or centered) or any(
+        l.bbox.x1 <= previous.bbox.x0 + ALIGN_TOLERANCE for l in beside
+    ):
+        left_room = 0
+    return left_room >= max(needed, HAND_BREAK_LEFT * span.size)
 
 
 def _rule_between(upper: Line, lower: Line, rules: list[pymupdf.Rect]) -> bool:
