@@ -1,5 +1,6 @@
 import json
 
+from doc_translator.languages import EN_PT_BR
 from doc_translator.translators.base import Glossary, Unit
 from doc_translator.translators.llm import LLMTranslator, _batches, _clean, _plausible
 
@@ -9,6 +10,7 @@ class FakeLLM(LLMTranslator):
 
     def __init__(self, answers: list[str], glossary: Glossary | None = None) -> None:
         self.model = "fake"
+        self.languages = EN_PT_BR
         self.user_glossary = glossary or Glossary()
         self._cache = {}
         self._progress = None
@@ -44,7 +46,7 @@ def test_units_are_batched_with_glossary_and_segments():
     llm = FakeLLM(
         [
             json.dumps({"translations": ["Visão geral", "A placa fornece os principais resultados via VistaLINK."]}),
-            json.dumps({"items": [["principais resultados"]]}),
+            json.dumps({"translations": ["principais resultados"]}),
         ],
         glossary=Glossary(terms={"Overview": "Visão geral"}),
     )
@@ -65,7 +67,11 @@ def test_units_are_batched_with_glossary_and_segments():
     assert results[1].segments == ["principais resultados"]
     batch_prompt = llm.prompts[0][1]["content"]
     assert '"Overview" -> "Visão geral"' in batch_prompt  # user glossary used
-    assert len(llm.prompts) == 2  # no recurring terms: no terminology call
+    # Styled phrases go in their own batch, after the paragraphs, without
+    # context; no terminology call (no recurring terms).
+    assert '"main results"' not in batch_prompt
+    assert "Preceding text" not in llm.prompts[1][1]["content"]
+    assert len(llm.prompts) == 2
 
 
 def test_bad_batch_answer_falls_back_to_one_by_one():
@@ -78,12 +84,6 @@ def test_bad_batch_answer_falls_back_to_one_by_one():
     )
     results = llm.translate_units([Unit("Overview"), Unit("Highlights")])
     assert [r.text for r in results] == ["Visão geral", "Destaques"]
-
-
-def test_segment_not_in_translation_falls_back_to_source_phrase():
-    llm = FakeLLM([json.dumps({"items": [["algo inventado"]]})])
-    located = llm._locate_batch([Unit("the main results", ["main results"])], ["os resultados"])
-    assert located == [["main results"]]
 
 
 def test_changed_numbers_are_detected():
@@ -172,3 +172,14 @@ def test_interrupted_run_resumes_from_saved_progress():
     assert len(llm.prompts) == 1
     assert llm.prompts[0][-1]["content"].endswith('[\n"Turn on the device."\n]')
     assert store["Turn on the device."] == "Ligue o aparelho."  # saved as it goes
+
+
+def test_prompts_follow_the_language_pair():
+    from dataclasses import replace
+
+    llm = FakeLLM([json.dumps({"translations": ["Visão geral"]})])
+    llm.languages = replace(EN_PT_BR, target="European Portuguese", target_code="pt-PT")
+    llm.translate_units([Unit("Overview")])
+    system, user = llm.prompts[0]
+    assert "English to European Portuguese (pt-PT)" in system["content"]
+    assert "into European Portuguese" in " ".join(user["content"].split())

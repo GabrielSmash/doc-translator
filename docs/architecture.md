@@ -41,7 +41,7 @@ cli.py ── builds the translator, calls ──► pipeline.translate_pdf
 | `terms.py` | Finds recurring terms of the document (uncommitted) |
 | `translators/base.py` | `Translator` protocol, `Unit`, `Glossary`, placeholder protection |
 | `translators/opus.py` | Opus-MT on CTranslate2, sentence by sentence |
-| `translators/llm.py` | Ollama: terminology, batches, checks, style location |
+| `translators/llm.py` | Ollama: terminology, batches, checks, styled phrases |
 | `fonts.py` | Reuses embedded fonts; picks a generic fallback family |
 | `render.py` | Removes the original text, computes the insertion box, writes HTML, recreates links and TOC leaders |
 | `pipeline.py` | Wires the stages for one document |
@@ -224,7 +224,7 @@ Each phase leaves the tool working and has a number to move.
 | 2 ✅ | Report and CLI summary; per-page isolation; translation cache | A run states what it changed; a layout experiment does not re-translate |
 | 3 ✅ | Model with kinds and actions; `extract.py` split | Every line of every corpus page belongs to one block |
 | 4 ✅ | `layout.py` separated from drawing; defects 1, 5, 10 (6 done in phase 3) | Identity run keeps full size in at least 98% of paragraphs |
-| 5 | Defect 8; `LanguagePair`; PyPI | Styles carried over on the LLM engine match the fast engine |
+| 5 ✅ | Defect 8; `LanguagePair`; PyPI | Styles carried over on the LLM engine match the fast engine |
 
 Phase 0 comes first because every later phase is judged by it. Phase 1 comes
 before the restructuring because those defects corrupt content today and
@@ -298,6 +298,21 @@ Accepted regressions, all checked on the rendered pages:
 
 Still open: the time to place text (16 s on the IRS form, 21 s before) is
 spent measuring each paragraph on a scratch page.
+
+### Phase 5 results
+
+| Change | Measured |
+|---|---|
+| Defect 8: the LLM engine translates each styled phrase on its own, in batches after the paragraphs and without context, and `align.py` finds it in the paragraph translation, as for the fast engine. The location step is removed | Manual, styles carried over: 88.9% to 97.2% (fast engine 100%); translation time 532 s to 420 s. Pages 15 to 17 (45 phrases): 84.4% to 100%, 89 s to 59 s, paragraph translations unchanged |
+| `LanguagePair` (`languages.py`): language names, target code, Opus-MT model and token, terminology examples for the prompt, source stopwords, target minor words. The engines, the CLI and the harness read it; the prompts it produces are identical to the previous ones | |
+| Package ready for PyPI: classifiers, project URLs, license file in the wheel; the wheel installs and runs in a clean environment; README installs with `uv tool install` | Name `doc-translator` free on PyPI |
+
+The three phrases still lost on the manual are wordings the LLM chooses
+differently inside the paragraph ("Type:" alone is "Tipo:", in the sentence
+"Digite:"; "bold" is "negrito" alone, "destacado" in the sentence). Phrases
+placed in the paragraphs' batches, or given their paragraph as context, were
+tried first: the model then copied whole paragraphs untranslated (6 instead
+of 1 on pages 15 to 17), so they are translated apart.
 
 ## 6. Open decisions
 

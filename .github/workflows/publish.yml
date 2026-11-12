@@ -1,0 +1,24 @@
+name: Publish
+
+# Runs when a version tag is pushed (git tag v0.1.0 && git push origin v0.1.0).
+# Uses PyPI trusted publishing: no token is stored in the repository.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    name: Build and publish to PyPI
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: uv run pytest -q
+      - name: Tag matches the package version
+        run: test "${GITHUB_REF_NAME#v}" = "$(uv version --short)"
+      - run: uv build
+      - run: uv publish --trusted-publishing always

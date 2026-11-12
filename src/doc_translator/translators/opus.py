@@ -8,6 +8,7 @@ from pathlib import Path
 import ctranslate2
 import sentencepiece as spm
 
+from ..languages import EN_PT_BR, LanguagePair
 from .base import Glossary, Unit, UnitTranslation, protect, restore, translate_independently
 from .cache import glossary_id
 from .checks import NUMBER, lost_numbers
@@ -25,11 +26,12 @@ class OpusTranslator:
     def __init__(
         self,
         model_dir: Path,
-        target_token: str,
         device: str = "auto",
         glossary: Glossary | None = None,
+        languages: LanguagePair = EN_PT_BR,
     ):
-        self.target_token = target_token
+        # Selects the target variant in a multilingual model (">>pob<<").
+        self.target_token = languages.opus_token
         # Glossary terms are swapped for placeholders: kept as-is or replaced
         # by their fixed translation after the model runs.
         self.glossary = glossary
@@ -37,7 +39,7 @@ class OpusTranslator:
         self.target_sp = spm.SentencePieceProcessor(str(model_dir / "target.spm"))
         self.model_dir = model_dir
         # A Hugging Face snapshot directory is named after its revision.
-        self.cache_id = f"opus|{model_dir.resolve()}|{target_token}|{glossary_id(glossary)}"
+        self.cache_id = f"opus|{model_dir.resolve()}|{self.target_token}|{glossary_id(glossary)}"
         self._unknown_cache: dict[str, bool] = {}
         if device == "auto":
             self._load_auto()

@@ -5,8 +5,9 @@ Unlike sentence-level models, the LLM:
    names, UI labels) so terminology stays consistent;
 2. translates paragraphs in batches, in reading order, seeing the text that
    precedes them;
-3. points out, in its own translation, the words matching each styled
-   phrase (bold, links...), instead of relying on fuzzy matching.
+3. translates each styled phrase (bold, links...) on its own, after the
+   paragraphs; align.py finds it in the paragraph's translation, as for
+   the fast engine.
 
 Answers are requested as JSON (Ollama structured outputs) and validated;
 anything that doesn't check out is retried one paragraph at a time.
@@ -18,6 +19,7 @@ import re
 import urllib.error
 import urllib.request
 
+from ..languages import EN_PT_BR, LanguagePair
 from ..terms import quoted_terms, recurring_terms
 from .base import Glossary, Unit, UnitTranslation
 from .cache import glossary_id
@@ -38,13 +40,13 @@ MAX_LENGTH_RATIO = 2.5
 MIN_LENGTH_RATIO = 0.3
 
 SYSTEM_PROMPT = """You are a professional translator of technical documents from \
-English to Brazilian Portuguese (pt-BR).
+{source} to {target} ({target_code}).
 Rules:
 - Translate the meaning faithfully; never add, omit or explain information.
 - Keep product names, model numbers, code, commands, file names, numbers, \
 units, URLs and emails exactly as in the original.
-- Use the standard Brazilian Portuguese terminology of the document's field. \
-Keep in English the technical terms Brazilian professionals keep in English.
+- Use the standard {target} terminology of the document's field. \
+Keep in {source} the technical terms {speakers} professionals keep in {source}.
 - Follow the glossary when one is given.
 - Be concise: each translation must fit in roughly the same space as the original.
 - Preserve the form: a heading stays a heading, a fragment stays a fragment, \
@@ -53,36 +55,24 @@ uppercase stays uppercase."""
 # Plain lines rather than a JSON schema: with some documents, schema-constrained
 # decoding made the model emit whitespace until the token limit.
 TERMS_PROMPT = """These terms recur in a technical document being translated \
-from English into Brazilian Portuguese. Decide how each one must be written \
+from {source} into {target}. Decide how each one must be written \
 everywhere in the translation, so the terminology stays consistent.
 Translate by default. Answer KEEP only for: product and brand names, names of \
-screens, menus, buttons or options shown by the software (in English), and \
-technical terms Brazilian professionals really use in English. Capital letters \
+screens, menus, buttons or options shown by the software (in {source}), and \
+technical terms {speakers} professionals really use in {source}. Capital letters \
 alone do not make a name.
 Answer one line per term, in the same order, exactly as in these examples:
-Power Supply => fonte de alimentação
-Rear Panel => painel traseiro
-Safety Guidelines => diretrizes de segurança
-Network Setup => KEEP
-Boot Loader => KEEP
+{examples}
 
 Terms, each with an example of use:
 {terms}"""
 TERM_LINE = re.compile(r"^\s*[-*\d.]*\s*(.+?)\s*=>\s*(.+?)\s*$")
 
-BATCH_PROMPT = """Translate each item of the JSON array below into Brazilian \
-Portuguese. Answer with {{"translations": [...]}}: exactly {count} strings, \
+BATCH_PROMPT = """Translate each item of the JSON array below into \
+{target}. Answer with {{"translations": [...]}}: exactly {count} strings, \
 in the same order, one per item.
 
 {items}"""
-
-SEGMENTS_PROMPT = """Each item has an English text, its Portuguese translation \
-and English phrases taken from the text. For every phrase, copy EXACTLY the \
-words of the Portuguese translation that correspond to it, or "" if none.
-Answer with {{"items": [...]}}: one array of strings per item, in order.
-
-{items}"""
-
 
 def _string_array(count: int | None = None) -> dict:
     schema: dict = {"type": "array", "items": {"type": "string"}}
@@ -93,9 +83,14 @@ def _string_array(count: int | None = None) -> dict:
 
 class LLMTranslator:
     def __init__(
-        self, model: str, host: str = DEFAULT_HOST, glossary: Glossary | None = None
+        self,
+        model: str,
+        host: str = DEFAULT_HOST,
+        glossary: Glossary | None = None,
+        languages: LanguagePair = EN_PT_BR,
     ) -> None:
         self.model = model
+        self.languages = languages
         self.host = host.rstrip("/")
         self.user_glossary = glossary or Glossary()
         self._cache: dict[str, str] = {}
@@ -107,7 +102,7 @@ class LLMTranslator:
         self._progress = None
         digest = self._check_model()
         # The digest changes when `ollama pull` brings a new version.
-        self.cache_id = f"llm|{model}|{digest}|{glossary_id(glossary)}"
+        self.cache_id = f"llm|{model}|{digest}|{languages.target_code}|{glossary_id(glossary)}"
 
     def keep_progress(self, store) -> None:
         """Save each translated batch to `store` (a cache namespace) and
@@ -116,41 +111,50 @@ class LLMTranslator:
 
     def translate_units(self, units: list[Unit]) -> list[UnitTranslation]:
         glossary = self._build_glossary(units).merged(self.user_glossary)
-        texts = [u.text for u in units]
+        paragraphs = [u.text for u in units]
+        self._translate_all(paragraphs, glossary, with_context=True)
+        # Styled phrases on their own, after the paragraphs, as the fast
+        # engine does; align.py finds them in the paragraph translations.
+        # Put in the paragraphs' batches, or shown their own paragraph as
+        # context, they made the model copy whole paragraphs in English.
+        self._translate_all([s for u in units for s in u.segments], glossary, with_context=False)
 
-        # Translate each distinct text once (headers and footers repeat on
-        # every page), batched in reading order with the preceding text.
+        return [
+            UnitTranslation(self._cache.get(u.text, u.text), [self._cache.get(s, s) for s in u.segments])
+            for u in units
+        ]
+
+    def _translate_all(self, texts: list[str], glossary: Glossary, with_context: bool) -> None:
+        """Translate each distinct text once into self._cache (headers and
+        footers repeat on every page), batched in reading order, with the
+        preceding text as context."""
         first_seen: dict[str, int] = {}
         for index, text in enumerate(texts):
             if any(c.isalpha() for c in text):
                 first_seen.setdefault(text, index)
         pending = list(first_seen)
         if self._progress is not None:
-            resumed = self._progress.get_many(pending)
+            resumed = self._progress.get_many([t for t in pending if t not in self._cache])
             self._cache.update(resumed)
             if resumed:
-                log.info("Resuming: %d paragraphs translated by an earlier run", len(resumed))
+                log.info("Resuming: %d texts translated by an earlier run", len(resumed))
         done = sum(text in self._cache for text in pending)
         pending = [text for text in pending if text not in self._cache]
         for batch in _batches(pending):
             start = first_seen[batch[0]]
-            context = texts[max(0, start - CONTEXT_UNITS) : start]
+            context = texts[max(0, start - CONTEXT_UNITS) : start] if with_context else []
             translated = dict(zip(batch, self._translate_batch(batch, context, glossary)))
             self._cache.update(translated)
             if self._progress is not None:
                 self._progress.put_many(translated)
             done += len(batch)
-            log.info("Translated %d/%d paragraphs", done, len(first_seen))
-
-        translations = [self._cache.get(text, text) for text in texts]
-        segments = self._locate_all(units, translations)
-        return [UnitTranslation(t, s) for t, s in zip(translations, segments)]
+            log.info("Translated %d/%d %s", done, len(first_seen), "paragraphs" if with_context else "styled phrases")
 
     # -- glossary ------------------------------------------------------------
 
     def _build_glossary(self, units: list[Unit]) -> Glossary:
         """Ask the model to decide, once, how each recurring term is rendered."""
-        candidates = recurring_terms([u.text for u in units])
+        candidates = recurring_terms([u.text for u in units], self.languages.source_stopwords)
         if not candidates:
             return Glossary()
         listing = "\n".join(
@@ -158,7 +162,7 @@ class LLMTranslator:
         )
         try:
             answer = self._chat(
-                [{"role": "user", "content": TERMS_PROMPT.format(terms=listing)}],
+                [{"role": "user", "content": self._format(TERMS_PROMPT, terms=listing)}],
                 max_tokens=64 + 24 * len(candidates),
             )
         except LLMError as error:
@@ -191,7 +195,8 @@ class LLMTranslator:
 
     def _translate_batch(self, texts: list[str], context: list[str], glossary: Glossary) -> list[str]:
         items = json.dumps(texts, ensure_ascii=False, indent=0)
-        prompt = self._prompt(BATCH_PROMPT.format(count=len(texts), items=items), texts, context, glossary)
+        task = self._format(BATCH_PROMPT, count=len(texts), items=items)
+        prompt = self._prompt(task, texts, context, glossary)
         schema = {
             "type": "object",
             "properties": {"translations": _string_array(len(texts))},
@@ -208,7 +213,7 @@ class LLMTranslator:
 
         results = []
         for index, (text, translation) in enumerate(zip(texts, translations)):
-            translation = _match_case(text, _clean(translation, text))
+            translation = self._match_case(text, _clean(translation, text))
             if _problems(text, translation, glossary):
                 # Context for a lone retry: whatever preceded it in the batch.
                 previous = (context + texts[:index])[-CONTEXT_UNITS:]
@@ -218,7 +223,7 @@ class LLMTranslator:
 
     def _translate_one(self, text: str, context: list[str], glossary: Glossary) -> str:
         prompt = self._prompt(f"Translate this text:\n{text}", [text], context, glossary)
-        if terms := glossary.relevant(text):
+        if terms := glossary.relevant(text, self.languages.source):
             prompt[0]["content"] += "\n- Mandatory terminology:\n" + terms
         if numbers := NUMBER.findall(text):
             # In the system message: put next to the text, small models
@@ -227,7 +232,7 @@ class LLMTranslator:
                 dict.fromkeys(numbers)
             )
         translation = _clean(self._chat(prompt, max_tokens=64 + len(text)), text)
-        translation = _match_case(text, translation)
+        translation = self._match_case(text, translation)
         if problems := _problems(text, translation, glossary):
             log.warning("Check translation of %r (%s): %r", text[:50], problems, translation[:80])
         return translation or text
@@ -236,67 +241,29 @@ class LLMTranslator:
         self, task: str, texts: list[str], context: list[str], glossary: Glossary
     ) -> list[dict]:
         parts = []
-        if terms := glossary.relevant("\n".join(texts)):
+        if terms := glossary.relevant("\n".join(texts), self.languages.source):
             parts.append(f"Glossary:\n{terms}")
         if context:
             parts.append("Preceding text (context only, do not translate):\n" + "\n".join(context))
         parts.append(task)
         return [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": self._format(SYSTEM_PROMPT)},
             {"role": "user", "content": "\n\n".join(parts)},
         ]
 
-    # -- styled phrases ------------------------------------------------------
-
-    def _locate_all(self, units: list[Unit], translations: list[str]) -> list[list[str]]:
-        located = [[] for _ in units]
-        styled = [i for i, unit in enumerate(units) if unit.segments]
-        for start in range(0, len(styled), BATCH_UNITS):
-            batch = styled[start : start + BATCH_UNITS]
-            answers = self._locate_batch([units[i] for i in batch], [translations[i] for i in batch])
-            for i, answer in zip(batch, answers):
-                located[i] = answer
-        return located
-
-    def _locate_batch(self, units: list[Unit], translations: list[str]) -> list[list[str]]:
-        items = json.dumps(
-            [
-                {"english": u.text, "portuguese": t, "phrases": u.segments}
-                for u, t in zip(units, translations)
-            ],
-            ensure_ascii=False,
-            indent=0,
+    def _format(self, prompt: str, **values) -> str:
+        pair = self.languages
+        return prompt.format(
+            source=pair.source,
+            target=pair.target,
+            target_code=pair.target_code,
+            speakers=pair.target_speakers,
+            examples=pair.term_examples,
+            **values,
         )
-        schema = {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": _string_array(),
-                    "minItems": len(units),
-                    "maxItems": len(units),
-                }
-            },
-            "required": ["items"],
-        }
-        prompt = [{"role": "user", "content": SEGMENTS_PROMPT.format(items=items)}]
-        size = sum(len(s) for u in units for s in u.segments)
-        try:
-            answers = json.loads(self._chat(prompt, schema=schema, max_tokens=128 + 2 * size))["items"]
-        except (ValueError, KeyError, LLMError):
-            answers = []
 
-        results = []
-        for index, (unit, translation) in enumerate(zip(units, translations)):
-            matches = answers[index] if index < len(answers) else []
-            if len(matches) != len(unit.segments):
-                matches = [""] * len(unit.segments)
-            # Only exact substrings are usable; anything else falls back to
-            # the fuzzy matching done by the caller (from the English phrase).
-            results.append(
-                [m if m and m in translation else seg for m, seg in zip(matches, unit.segments)]
-            )
-        return results
+    def _match_case(self, source: str, translation: str) -> str:
+        return _match_case(source, translation, self.languages.target_minor_words)
 
     # -- Ollama --------------------------------------------------------------
 
@@ -378,11 +345,6 @@ def _clean(answer: str, source: str) -> str:
     return text
 
 
-# Portuguese words left lowercase in title case.
-MINOR_WORDS = {"a", "o", "as", "os", "e", "de", "da", "do", "das", "dos", "em", "no", "na",
-               "nos", "nas", "para", "por", "com", "ao", "aos", "à", "às", "um", "uma"}
-
-
 def _problems(source: str, translation: str, glossary: Glossary | None = None) -> str:
     """Why a translation can't be trusted, or "" if it looks fine."""
     if not _plausible(source, translation):
@@ -408,7 +370,9 @@ def _mostly_upper(text: str) -> bool:
     return len(letters) > 1 and sum(c.isupper() for c in letters) >= 0.8 * len(letters)
 
 
-def _match_case(source: str, translation: str) -> str:
+def _match_case(
+    source: str, translation: str, minor_words: frozenset[str] = EN_PT_BR.target_minor_words
+) -> str:
     """Undo case changes the model made (it copies casing from nearby items).
 
     An uppercase translation of a non-uppercase source becomes title case or
@@ -436,7 +400,7 @@ def _match_case(source: str, translation: str) -> str:
             return word
         lower = word.lower()
         first = match.start() == first_word_start
-        if first or (title_case and lower not in MINOR_WORDS):
+        if first or (title_case and lower not in minor_words):
             return lower.capitalize()
         return lower
 

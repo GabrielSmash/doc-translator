@@ -8,11 +8,9 @@ terminology) changes from one run to the next.
 import re
 from collections import Counter
 
+from .languages import EN_PT_BR
+
 WORD = re.compile(r"[A-Za-z][\w®/\-]*")
-STOPWORDS = {
-    "a", "an", "and", "as", "at", "by", "for", "from", "if", "in", "into", "is",
-    "it", "of", "on", "or", "the", "this", "to", "when", "with", "you", "your",
-}
 MIN_PROSE_WORDS = 8  # paragraphs shorter than this are headings, labels...
 MIN_OCCURRENCES = 2
 MAX_TERMS = 40
@@ -20,7 +18,9 @@ MAX_TERMS = 40
 MAX_TERM_WORDS = 3
 
 
-def recurring_terms(texts: list[str]) -> dict[str, str]:
+def recurring_terms(
+    texts: list[str], stopwords: frozenset[str] = EN_PT_BR.source_stopwords
+) -> dict[str, str]:
     """Multi-word Capitalized terms recurring in running text.
 
     Returns {term: an example paragraph using it}, most frequent first.
@@ -32,7 +32,7 @@ def recurring_terms(texts: list[str]) -> dict[str, str]:
     counts: Counter[str] = Counter()
     canonical: dict[str, str] = {}
     for text in prose:
-        for term in set(_capitalized_runs(text, lowercase)):
+        for term in set(_capitalized_runs(text, lowercase, stopwords)):
             key = term.lower()
             counts[key] += 1
             canonical.setdefault(key, term)
@@ -67,7 +67,7 @@ def _is_prose(text: str) -> bool:
     return sum(c.isupper() for c in letters) < 0.5 * len(letters)
 
 
-def _capitalized_runs(text: str, lowercase: set[str]) -> list[str]:
+def _capitalized_runs(text: str, lowercase: set[str], stopwords: frozenset[str]) -> list[str]:
     """Maximal runs of 2+ capitalized words ("7700FC Frame Controller" -> "Frame Controller")."""
     runs, current = [], []
     for match in WORD.finditer(text):
@@ -87,9 +87,9 @@ def _capitalized_runs(text: str, lowercase: set[str]) -> list[str]:
         if run and _starts_sentence(text, run[0][1]) and run[0][0].lower() in lowercase:
             run = run[1:]
         words = [w for w, _, _ in run]
-        while words and words[0].lower() in STOPWORDS:
+        while words and words[0].lower() in stopwords:
             words.pop(0)
-        while words and words[-1].lower() in STOPWORDS:
+        while words and words[-1].lower() in stopwords:
             words.pop()
         if 2 <= len(words) <= MAX_TERM_WORDS:
             terms.append(" ".join(words))

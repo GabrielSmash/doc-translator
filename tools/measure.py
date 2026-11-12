@@ -107,10 +107,10 @@ def make_engine(name: str):
     if name == "fast":
         from huggingface_hub import snapshot_download
 
-        from doc_translator.cli import MODEL_REPO, PT_BR_TOKEN
+        from doc_translator.languages import EN_PT_BR
         from doc_translator.translators.opus import OpusTranslator
 
-        return OpusTranslator(Path(snapshot_download(MODEL_REPO)), PT_BR_TOKEN, "auto")
+        return OpusTranslator(Path(snapshot_download(EN_PT_BR.opus_model)))
     if name == "llm":
         from doc_translator.cli import DEFAULT_LLM
         from doc_translator.translators.llm import LLMTranslator

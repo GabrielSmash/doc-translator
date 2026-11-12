@@ -39,7 +39,7 @@ class UnitTranslation:
 
 @dataclass
 class Glossary:
-    """Terms to keep in English and terms with a fixed translation."""
+    """Terms to keep in the source language and terms with a fixed translation."""
 
     keep: list[str] = field(default_factory=list)
     terms: dict[str, str] = field(default_factory=dict)
@@ -57,10 +57,12 @@ class Glossary:
         keep = [k for k in dict.fromkeys(self.keep + other.keep) if k not in other.terms]
         return Glossary(keep=keep, terms=terms)
 
-    def relevant(self, text: str) -> str:
+    def relevant(self, text: str, source_language: str) -> str:
         """Glossary lines for the terms that occur in `text` (for prompts)."""
         lower = text.lower()
-        lines = [f'- "{term}": keep in English' for term in self.keep if term.lower() in lower]
+        lines = [
+            f'- "{term}": keep in {source_language}' for term in self.keep if term.lower() in lower
+        ]
         lines += [
             f'- "{source}" -> "{target}"'
             for source, target in self.terms.items()

@@ -189,3 +189,13 @@ Found while fixing:
   page's paragraphs as one piece brought it from 3.6x to 1.17x.
 - Measuring the link metrics by rectangle counted a link split per word as
   several; they now count targets per page.
+
+### Phase 5 results
+
+| Defect | Status | Measured |
+|---|---|---|
+| 8: LLM style location | Fixed | Manual: styles carried over 88.9% to 97.2% (fast engine 100%), translation 532 s to 420 s. The 3 phrases left are wordings the model changes inside the sentence ("Type:" alone "Tipo:", in the sentence "Digite:") |
+
+Found while fixing: styled phrases put in the same batches as their
+paragraphs made the model return whole paragraphs untranslated; they are now
+translated in their own batches, without context.

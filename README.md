@@ -17,9 +17,16 @@ Currently supported: **English → Brazilian Portuguese**.
 ## Usage
 
 ```bash
+uv tool install doc-translator              # or: pipx install doc-translator
+doc-translator document.pdf                 # writes document.pt-BR.pdf
+```
+
+From the source:
+
+```bash
 git clone https://github.com/GabrielSmash/doc-translator
 cd doc-translator
-uv run doc-translator document.pdf          # writes document.pt-BR.pdf
+uv run doc-translator document.pdf
 ```
 
 On the first run of the `fast` engine, its model (~230 MB) is downloaded from
@@ -56,7 +63,7 @@ Install [Ollama](https://ollama.com/download) and the model:
 
 ```bash
 ollama pull qwen3:4b-instruct
-uv run doc-translator document.pdf --engine llm
+doc-translator document.pdf --engine llm
 ```
 
 Each translation is checked; anything that fails is retried on its own and,
@@ -81,7 +88,8 @@ the `llm` engine your glossary is merged with the one built automatically.
 ### GPU for the fast engine
 
 ```bash
-uv sync --extra gpu    # installs the CUDA libraries CTranslate2 needs
+uv tool install 'doc-translator[gpu]'   # with the CUDA libraries CTranslate2 needs
+uv sync --extra gpu                     # the same, from the source
 ```
 
 ## How it works
@@ -136,6 +144,10 @@ gets worse. After an improvement, store the new numbers with
 `uv run python -m tools.measure --fixtures --corpus --update-baseline`.
 Known defects have tests marked `xfail(strict=True)`: when a fix makes one
 pass, remove its marker. See [docs/architecture.md](docs/architecture.md).
+
+Releases: set the version in `pyproject.toml`, then push a tag with the same
+version (`git tag v0.1.0 && git push origin v0.1.0`). The `Publish` workflow
+runs the tests and uploads the package to PyPI (trusted publishing).
 
 ## License
 

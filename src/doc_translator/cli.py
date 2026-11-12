@@ -6,6 +6,7 @@ from pathlib import Path
 from huggingface_hub import snapshot_download
 from huggingface_hub.errors import HfHubHTTPError, LocalEntryNotFoundError
 
+from .languages import EN_PT_BR
 from .pipeline import DocumentError, translate_pdf
 from .report import Report
 from .translators.base import Glossary
@@ -13,20 +14,17 @@ from .translators.cache import CachedTranslator, TranslationCache, default_path
 from .translators.llm import DEFAULT_HOST, LLMError, LLMTranslator
 from .translators.opus import OpusTranslator
 
-# Conversion of Helsinki-NLP/opus-mt-tc-big-en-pt published by this project
-# (see scripts/convert_model.py).
-MODEL_REPO = "gabrielsmash/opus-mt-tc-big-en-pt-ct2-int8"
-PT_BR_TOKEN = ">>pob<<"
+LANGUAGES = EN_PT_BR
 DEFAULT_LLM = "qwen3:4b-instruct"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="doc-translator",
-        description="Translate a PDF from English to Brazilian Portuguese, keeping its layout.",
+        description=f"Translate a PDF from {LANGUAGES.source} to {LANGUAGES.target}, keeping its layout.",
     )
     parser.add_argument("input", type=Path, help="PDF to translate")
-    parser.add_argument("-o", "--output", type=Path, help="default: <input>.pt-BR.pdf")
+    parser.add_argument("-o", "--output", type=Path, help=f"default: <input>.{LANGUAGES.target_code}.pdf")
     parser.add_argument(
         "--engine",
         choices=["fast", "llm"],
@@ -43,7 +41,9 @@ def main() -> None:
         help='JSON file: {"keep": ["terms to keep"], "terms": {"source": "translation"}}',
     )
     parser.add_argument(
-        "--model", type=Path, help=f"local CTranslate2 model dir (default: download {MODEL_REPO})"
+        "--model",
+        type=Path,
+        help=f"local CTranslate2 model dir (default: download {LANGUAGES.opus_model})",
     )
     parser.add_argument("--report", type=Path, metavar="FILE", help="write what the run changed, as JSON")
     parser.add_argument(
@@ -60,7 +60,7 @@ def main() -> None:
 
     if not args.input.is_file():
         sys.exit(f"error: {args.input} not found")
-    output = args.output or args.input.with_suffix(".pt-BR.pdf")
+    output = args.output or args.input.with_suffix(f".{LANGUAGES.target_code}.pdf")
     glossary = None
     if args.glossary:
         try:
@@ -69,14 +69,14 @@ def main() -> None:
             sys.exit(f"error: invalid glossary {args.glossary}: {error}")
     if args.engine == "llm":
         try:
-            translator = LLMTranslator(args.llm_model, args.ollama_host, glossary)
+            translator = LLMTranslator(args.llm_model, args.ollama_host, glossary, LANGUAGES)
         except LLMError as error:
             sys.exit(f"error: {error}")
     else:
         model_dir = args.model or _download_model()
         if not (model_dir / "model.bin").is_file():
             sys.exit(f"error: no CTranslate2 model (model.bin) in {model_dir}")
-        translator = OpusTranslator(model_dir, PT_BR_TOKEN, args.device, glossary)
+        translator = OpusTranslator(model_dir, args.device, glossary, LANGUAGES)
     if not args.no_cache:
         translator = CachedTranslator(translator, TranslationCache(default_path()))
     try:
@@ -100,6 +100,6 @@ def main() -> None:
 def _download_model() -> Path:
     """Fetch the model on first use; later runs reuse the Hugging Face cache."""
     try:
-        return Path(snapshot_download(MODEL_REPO))
+        return Path(snapshot_download(LANGUAGES.opus_model))
     except (HfHubHTTPError, LocalEntryNotFoundError) as error:
-        sys.exit(f"error: could not download the model {MODEL_REPO}: {error}")
+        sys.exit(f"error: could not download the model {LANGUAGES.opus_model}: {error}")
