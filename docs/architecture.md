@@ -223,7 +223,7 @@ Each phase leaves the tool working and has a number to move.
 | 1 ✅ | Defects 3 and 2 (content corruption), 7 and 9 (small); 4 moved here | No blank characters on the NIST report; tables on manual pages 17 and 29 intact |
 | 2 ✅ | Report and CLI summary; per-page isolation; translation cache | A run states what it changed; a layout experiment does not re-translate |
 | 3 ✅ | Model with kinds and actions; `extract.py` split | Every line of every corpus page belongs to one block |
-| 4 | `layout.py` separated from drawing; defects 1, 5, 10 (6 done in phase 3) | Identity run keeps full size in at least 98% of paragraphs |
+| 4 ✅ | `layout.py` separated from drawing; defects 1, 5, 10 (6 done in phase 3) | Identity run keeps full size in at least 98% of paragraphs |
 | 5 | Defect 8; `LanguagePair`; PyPI | Styles carried over on the LLM engine match the fast engine |
 
 Phase 0 comes first because every later phase is judged by it. Phase 1 comes
@@ -266,6 +266,38 @@ and the `analysis` package (stage 2): `model.py`, `lines.py`, `graphics.py`,
 where text is kept on purpose (rotated text fixture 100% to 81%); `kept_pct`
 shows the rest. `render.py`, `fonts.py` and `translators/` keep their place
 until phase 4 splits layout from drawing.
+
+### Phase 4 results
+
+`render.py` became `layout.py` (stage 5: box, HTML and scale, measured on a
+scratch page) and `pdf/draw.py` (stage 6: executes the placements).
+
+| Change | Measured |
+|---|---|
+| Defect 1: the last line of a paragraph may go down to the letters of the next element (its first baseline minus its ascent) or to the edge of an image or fill, instead of stopping at neighboring line boxes | Identity run, paragraphs at full size: arXiv 78.3% to 98.4%, IRS 65.2% to 99.8%, NIST 98.8% to 100%, manual 99.9%. Pseudo-translation: IRS 60.4% to 93.1%, arXiv 66.7% to 87.6% |
+| Line height taken from the largest letters of the paragraph; multi-line paragraphs may grow 3% sideways into free space, so a slightly wider replacement font does not add a line | Part of the numbers above |
+| Defect 10: a fill containing the text (a header band) bounds the translation | New fixture `dark_band`: no blank characters with pseudo-translation (1 before) |
+| Defect 5: links are read whole (any kind), spans split where a link starts or ends, recreated over the translated words; links not recreated are put back where they were | NIST: internal links lost 6 to 0, URI 2 to 0; fixture `internal_links`: 0. The link metrics now count targets per page, not rectangles |
+| All the paragraphs of a page are drawn as one piece of content instead of one Form XObject each | Output size: IRS 3.6x to 1.17x, NIST 1.25x to 1.12x, arXiv 1.24x to 1.08x. Word positions identical to within 0.05 pt |
+| First-line indent kept (`text-indent`): hanging indent of list items, text after a run-in heading ("Encoder:") | NIST list items line up after their number again; arXiv run-in headings no longer overprinted |
+| Footnotes: a line starting with a small mark starts a new block; small raised spans are superscripts | NIST and arXiv footnotes no longer merged; marks stay raised |
+| Lines of symbols only (dot leaders of forms, arrows) are kept | IRS: 1.3% of the text kept, no longer redrawn |
+
+Accepted regressions, all checked on the rendered pages:
+
+- Row correlation of the ink profile drops on a few pages (arXiv
+  pseudo-translation mean 0.815 to 0.789; IRS page 2 0.606 to 0.515; arXiv
+  page 4 0.931 to 0.872): first-line and hanging indents are now kept, and
+  text grows into space it may now use instead of shrinking in place. Each
+  page was compared with the previous output: equal or closer to the
+  original by eye (arXiv page 4 had paragraphs printed over each other).
+- IRS pseudo-translation: translations running longer than the original
+  reach the form's dot leaders (overlaps 140 to 141; already there before).
+- `below_6pt` counts paragraphs starting with a footnote mark smaller than
+  6 pt even when nothing was reduced.
+
+Still open: the time to place text (16 s on the IRS form, 21 s before) is
+spent measuring each paragraph on a scratch page.
 
 ## 6. Open decisions
 

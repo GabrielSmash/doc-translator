@@ -13,15 +13,19 @@ TEXT_FLAGS = (
 
 def read_page(page: pymupdf.Page) -> PageContent:
     links = [
-        (pymupdf.Rect(link["from"]), link["uri"]) for link in page.get_links() if link.get("uri")
+        (pymupdf.Rect(link["from"]), link_key(link))
+        for link in page.get_links()
+        if link["kind"] != pymupdf.LINK_NONE
     ]
     blocks = []
-    for b, block in enumerate(page.get_text("dict", flags=TEXT_FLAGS)["blocks"]):
+    # rawdict: the same as dict, plus the box of each character, needed to
+    # split text where a link starts or ends.
+    for b, block in enumerate(page.get_text("rawdict", flags=TEXT_FLAGS)["blocks"]):
         if block["type"] != 0:  # 1 = image block
             continue
         lines = []
         for n, raw in enumerate(block["lines"]):
-            spans = [_span(s) for s in raw["spans"] if s["text"]]
+            spans = [span for s in raw["spans"] for span in _spans(s, links)]
             if spans:
                 lines.append(
                     Line(spans, pymupdf.Rect(raw["bbox"]), tuple(raw["dir"]), origin=(b, n))
@@ -30,13 +34,66 @@ def read_page(page: pymupdf.Page) -> PageContent:
     return PageContent(blocks=blocks, drawings=page.get_drawings(), links=links)
 
 
-def _span(raw: dict) -> Span:
+def link_key(link: dict) -> str:
+    """What a link points to, as a string: the same for every piece of it,
+    and enough for drawing to find the link again and recreate it."""
+    if link.get("uri"):
+        return link["uri"]
+    fields = ("kind", "page", "to", "file", "name", "nameddest")
+    return "#" + "|".join(str(link[f]) for f in fields if link.get(f) is not None)
+
+
+def _spans(raw: dict, links: list[tuple[pymupdf.Rect, str]]) -> list[Span]:
+    """The span, split where a link starts or ends inside it ("see the
+    *configuration section* for..."), so the link can follow its words."""
+    chars = raw["chars"]
+    if not chars:
+        return []
+    keys = [_link_at(pymupdf.Rect(c["bbox"]), links) for c in chars]
+    pieces: list[list[dict]] = [[chars[0]]]
+    for previous, key, char in zip(keys, keys[1:], chars[1:]):
+        if key == previous:
+            pieces[-1].append(char)
+        else:
+            pieces.append([char])
+    if len(pieces) == 1:
+        return [_span(raw, "".join(c["c"] for c in chars), pymupdf.Rect(raw["bbox"]))]
+    spans = []
+    for piece in pieces:
+        bbox = pymupdf.Rect(piece[0]["bbox"])
+        for char in piece[1:]:
+            bbox |= char["bbox"]
+        spans.append(_span(raw, "".join(c["c"] for c in piece), bbox))
+    return spans
+
+
+def _link_at(rect: pymupdf.Rect, links: list[tuple[pymupdf.Rect, str]]) -> str | None:
+    center = (rect.tl + rect.br) / 2
+    return next((key for area, key in links if center in area), None)
+
+
+def _span(raw: dict, text: str, bbox: pymupdf.Rect) -> Span:
     return Span(
-        text=raw["text"],
+        text=text,
         font=raw["font"],
         size=raw["size"],
         flags=raw["flags"],
         color=raw["color"],
-        bbox=pymupdf.Rect(raw["bbox"]),
+        bbox=bbox,
         baseline=raw["origin"][1],
     )
+
+
+def graphic_areas(page: pymupdf.Page) -> list[pymupdf.Rect]:
+    """Images and filled areas: places translated text must not grow into.
+
+    Drawings made only of strokes (rules, borders) are left out: text sits
+    between them, and line art is checked separately when grouping lines.
+    """
+    rects = [pymupdf.Rect(info["bbox"]) for info in page.get_image_info()]
+    for drawing in page.get_drawings():
+        rect = pymupdf.Rect(drawing["rect"])
+        only_strokes = all(item[0] == "l" for item in drawing["items"])
+        if not only_strokes and rect.height >= 1.5 and rect.width >= 1.5:
+            rects.append(rect)
+    return rects

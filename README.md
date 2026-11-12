@@ -89,12 +89,15 @@ uv sync --extra gpu    # installs the CUDA libraries CTranslate2 needs
 ```text
 read     → text lines, drawings and links of each page (PyMuPDF)
 analyze  → every line goes into one block with a kind (paragraph, heading,
-           list item, table cell, TOC entry, caption, code, marker, rotated)
-           and an action: translate, or keep as it is (code, markers, rotated)
+           list item, table cell, TOC entry, caption, code, marker, symbols,
+           rotated) and an action: translate, or keep as it is
 translate→ fast: sentence by sentence; llm: glossary + batches in reading order
 align    → bold/italic/links are mapped onto the translated text
-render   → original text removed, translation written in the same area,
-           reusing the embedded fonts when they contain every needed glyph
+layout   → where each translation goes: down to the letters of the next
+           element, inside the colored area it sits on, reusing the embedded
+           fonts when they contain every needed glyph
+draw     → original text removed, translations written, links recreated
+           over the translated words (internal links too)
 ```
 
 ## Known limitations
@@ -104,7 +107,9 @@ render   → original text removed, translation written in the same area,
 - Subset fonts (the most common case) cannot draw letters the original
   text didn't use, so a font with the same metrics (Times, Helvetica or
   Courier) is used instead.
-- Rows of tightly packed tables are drawn slightly smaller than the original.
+- A translation that runs longer than the original line can reach the dot
+  leaders of a form (". . . . ."), which stay in place.
+- Formulas are flattened: sub and superscripts inside them are not kept.
 - Monospaced text (code, terminal output) is not translated.
 - Scanned PDFs (images without text) are not supported: run OCR on them first
   (e.g. [OCRmyPDF](https://ocrmypdf.readthedocs.io)). Password-protected PDFs

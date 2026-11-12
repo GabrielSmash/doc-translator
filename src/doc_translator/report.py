@@ -14,7 +14,12 @@ from .fonts import SUBSET_PREFIX
 
 FULL_SIZE = 0.999  # scales above this count as the original size
 MAX_LISTED = 8  # pages or fonts named in the summary before "..."
-KEPT_NAMES = {"marker": "list markers", "code": "code blocks", "rotated": "rotated lines"}
+KEPT_NAMES = {
+    "marker": "list markers",
+    "symbols": "lines of symbols",
+    "code": "code blocks",
+    "rotated": "rotated lines",
+}
 
 
 @dataclass

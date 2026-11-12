@@ -90,7 +90,9 @@ class PageContent:
 
     blocks: list[TextBlock]
     drawings: list[dict]  # page.get_drawings(); spans refer to them by index
-    links: list[tuple[pymupdf.Rect, str]]  # URI links
+    # Every link, by what it points to (pdf.read.link_key): a URI, or a
+    # place in a document.
+    links: list[tuple[pymupdf.Rect, str]]
 
 
 @dataclass
@@ -114,6 +116,7 @@ class Kind(StrEnum):
     CAPTION = "caption"
     CODE = "code"  # monospaced: commands, terminal output
     MARKER = "marker"  # a bullet or number standing apart from its text
+    SYMBOLS = "symbols"  # punctuation and symbols only: nothing to translate
     ROTATED = "rotated"  # text not written left to right
 
 

@@ -1,4 +1,4 @@
-"""End-to-end flow: read and analyze -> translate -> realign styles -> render."""
+"""End-to-end flow: read and analyze -> translate -> align -> layout -> draw."""
 
 import logging
 import time
@@ -12,7 +12,9 @@ import pymupdf
 from .align import base_style, paragraph_runs, realign, styled_segments
 from .analysis import Action, Block, analyze_page
 from .fonts import FontLibrary
-from .render import Placement, TranslatedParagraph, render_page
+from .layout import Placement, TranslatedParagraph, layout_page
+from .pdf.draw import draw_page
+from .pdf.read import graphic_areas
 from .translators import Translator, Unit, UnitTranslation
 
 log = logging.getLogger(__name__)
@@ -128,9 +130,13 @@ def _translate_document(doc: pymupdf.Document, translator: Translator, result: R
         failed = []
         for index, (page, page_blocks) in enumerate(zip(doc, result.pages)):
             translated = [by_paragraph[id(b)] for b in page_blocks if b.action == Action.TRANSLATE]
-            kept_areas = [b.bbox for b in page_blocks if b.action == Action.KEEP]
             try:
-                result.placements += render_page(page, translated, result.fonts, kept_areas)
+                # Kept text (code, markers, rotated lines) is an obstacle too.
+                placements = layout_page(
+                    page.rect, translated, page_blocks, graphic_areas(page), result.fonts
+                )
+                draw_page(page, placements, result.fonts.archive)
+                result.placements += placements
             except Exception as error:
                 result.fail(index, "drawing", error)
                 failed.append(index)

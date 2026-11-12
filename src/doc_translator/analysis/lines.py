@@ -3,11 +3,15 @@ and links resolved."""
 
 import pymupdf
 
-from .model import Line, Span
+from .model import FLAG_SUPERSCRIPT, Line, Span
 
 # A horizontal gap wider than this (in font sizes) inside a PyMuPDF line
 # separates different items: table cells, tab stops...
 COLUMN_GAP = 1.0
+# A span this much smaller than the line's largest, with its baseline raised
+# by this fraction of its own size, is a superscript.
+SUPERSCRIPT_SIZE_RATIO = 0.85
+SUPERSCRIPT_RISE = 0.25
 
 
 def visual_lines(line: Line, links: list[tuple[pymupdf.Rect, str]]) -> list[Line]:
@@ -25,6 +29,7 @@ def visual_lines(line: Line, links: list[tuple[pymupdf.Rect, str]]) -> list[Line
         else:
             groups.append([span])
 
+    _mark_raised(line)
     lines = []
     for group in groups:
         rect = pymupdf.Rect(group[0].bbox)
@@ -32,6 +37,19 @@ def visual_lines(line: Line, links: list[tuple[pymupdf.Rect, str]]) -> list[Line
             rect |= span.bbox
         lines.append(Line(group, rect, line.direction, line.origin))
     return lines
+
+
+def _mark_raised(line: Line) -> None:
+    """Flag as superscript the smaller spans set above the line's baseline.
+
+    PDFs rarely say a span is a superscript: footnote marks ("∗Equal
+    contribution", "¹ https://...") are just smaller text drawn higher.
+    """
+    largest = max(s.size for s in line.spans)
+    for span in line.spans:
+        raised = line.baseline - span.baseline
+        if span.size < SUPERSCRIPT_SIZE_RATIO * largest and raised > SUPERSCRIPT_RISE * span.size:
+            span.flags |= FLAG_SUPERSCRIPT
 
 
 def _mark_small_caps(spans: list[Span]) -> None:

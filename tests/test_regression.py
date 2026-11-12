@@ -115,9 +115,18 @@ def test_accented_letters_are_drawn(fixture_paths):
     assert measured("blank_accents", "pseudo", fixture_paths)["blank_chars"] == 0
 
 
-@defect(5, "internal links are removed with the text")
-def test_internal_links_are_kept(fixture_paths):
-    assert measured("internal_links", "identity", fixture_paths)["internal_links_lost"] == 0
+@pytest.mark.parametrize("engine", ENGINES)
+def test_links_follow_the_translated_words(engine, fixture_paths):
+    """Defect 5, fixed: links inside a line, internal ones too, are recreated
+    over the translation (or put back where they were)."""
+    metrics = measured("internal_links", engine, fixture_paths)
+    assert metrics["internal_links_lost"] == metrics["uri_links_lost"] == 0
+
+
+def test_text_on_a_dark_band_stays_inside_it(fixture_paths):
+    """Defect 10, fixed: white text on a black band shrinks to stay on it
+    instead of running onto the white page, where it would be invisible."""
+    assert measured("dark_band", "pseudo", fixture_paths)["blank_chars"] == 0
 
 
 def test_rotated_text_is_kept(fixture_paths):
@@ -126,17 +135,10 @@ def test_rotated_text_is_kept(fixture_paths):
 
 
 @pytest.mark.corpus
-@pytest.mark.parametrize(
-    "name",
-    [
-        # NIST reached 98% once its rotated labels were kept as they are and
-        # stopped acting as paragraphs that shrink their neighbors (phase 3).
-        "nist",
-        pytest.param("arxiv", marks=defect(1, "insertion box too short: untranslated text shrinks")),
-        pytest.param("irs-w4", marks=defect(1, "insertion box too short: untranslated text shrinks")),
-    ],
-)
+@pytest.mark.parametrize("name", ["arxiv", "irs-w4", "nist"])
 def test_untranslated_text_keeps_its_size(name):
+    """Defect 1, fixed: text is bounded by the letters of its neighbors and
+    by baselines, not by the boxes around them."""
     assert measured(name, "identity")["full_size_pct"] >= 98
 
 
@@ -147,19 +149,9 @@ def test_ligatures_are_drawn_on_word_documents():
 
 
 @pytest.mark.corpus
-@pytest.mark.parametrize(
-    "name",
-    [
-        "arxiv",
-        "nist",
-        pytest.param(
-            "irs-w4",
-            marks=pytest.mark.xfail(
-                reason="one Form XObject per inserted paragraph (681 tiny paragraphs)", strict=True
-            ),
-        ),
-    ],
-)
+@pytest.mark.parametrize("name", ["arxiv", "irs-w4", "nist"])
 def test_output_is_not_inflated(name):
-    """Defect 7, fixed: duplicate ToUnicode tables are merged on save."""
+    """Defect 7, fixed: duplicate ToUnicode tables are merged on save. The
+    paragraphs of a page are drawn as one piece of content, not one per
+    paragraph (681 on the IRS form)."""
     assert measured(name, "identity")["size_ratio"] <= 1.5

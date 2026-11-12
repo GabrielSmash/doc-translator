@@ -173,3 +173,19 @@ Found while fixing:
   share of full-size paragraphs dropped from 83.8% to 78.3%. Phase 4
   recovers it.
 
+### Phase 4 results
+
+| Defect | Status | Measured |
+|---|---|---|
+| 1: insertion box too short | Fixed | Identity run, full size: arXiv 78.3% to 98.4%, IRS 65.2% to 99.8%, NIST 100%, manual 99.9% (76.7% in the audit). Text is bounded by the letters of the next element, not by its box |
+| 5: internal links | Fixed | NIST: 6 internal and 2 URI links lost, now 0. Links inside a line are kept with their words; any link not recreated is put back |
+| 10: white text off its dark fill | Fixed | Text inside a fill stays inside it; fixture `dark_band` reproduces the manual's table headers |
+
+Found while fixing:
+
+- Line height was computed from the first span of a paragraph; a smaller
+  footnote mark there spaced the whole note 1.5 times wider.
+- The IRS output size came from one Form XObject per paragraph; drawing a
+  page's paragraphs as one piece brought it from 3.6x to 1.17x.
+- Measuring the link metrics by rectangle counted a link split per word as
+  several; they now count targets per page.

@@ -14,6 +14,9 @@ LEADER = re.compile(r"\s*(?:[.·…]\s?){4,}\s*(\d+|[ivxlcdm]+)?\s*$", re.IGNORE
 LIST_MARKER = re.compile(rf"^\s*{MARKER}\s+")
 MARKER_ONLY = re.compile(rf"^\s*{MARKER}\s*$")
 SYMBOL_FONTS = ("symbol", "wingdings", "dingbats", "webdings")
+FOOTNOTE_MARK = re.compile(r"^\s*(?:\d{1,3}|[*†‡§¶])\s*$")
+# A footnote mark is set this much smaller than the note's text, at most.
+FOOTNOTE_SIZE_RATIO = 0.85
 
 # Tolerance, in points, when comparing positions of lines.
 ALIGN_TOLERANCE = 2.0
@@ -47,13 +50,18 @@ def split_block(
             marker_baselines.append(line.baseline)
             blocks.append(kept_block([line], Kind.MARKER))
             continue
+        if not any(c.isalnum() for c in line.text):
+            # Dots of a form's leaders, arrows, "!": nothing to translate.
+            blocks.append(kept_block([line], Kind.SYMBOLS))
+            continue
 
         after_marker = any(abs(b - line.baseline) < 1 for b in marker_baselines)
         new_row = any(
             abs(b - line.baseline) < 1 and x < line.bbox.x0 for b, x in starts
         )
         target = None
-        if not (after_marker or new_row) and not LIST_MARKER.match(line.text):
+        starts_item = LIST_MARKER.match(line.text) or _starts_footnote(line)
+        if not (after_marker or new_row or starts_item):
             target = next(
                 (
                     p
@@ -86,6 +94,15 @@ def split_block(
     return blocks
 
 
+def _starts_footnote(line: Line) -> bool:
+    """A small number or mark before text: "¹ https://...", "† Work done at".
+    Consecutive footnotes otherwise read as one paragraph."""
+    spans = [s for s in line.spans if s.text.strip()]
+    if len(spans) < 2 or not FOOTNOTE_MARK.match(spans[0].text):
+        return False
+    return spans[0].superscript or spans[0].size < FOOTNOTE_SIZE_RATIO * max(s.size for s in spans[1:])
+
+
 def _is_marker_only(line: Line) -> bool:
     if MARKER_ONLY.match(line.text):
         return True
@@ -103,7 +120,9 @@ def _continues(
         return False
     if line.bbox.x0 >= previous.bbox.x1 or line.bbox.x1 <= previous.bbox.x0:
         return False  # no horizontal overlap: another column
-    if abs(previous.spans[0].size - line.spans[0].size) > 0.5:
+    # The largest letters: a footnote mark or superscript starting a line
+    # is smaller than the text it belongs to.
+    if abs(size - max(s.size for s in line.spans)) > 0.5:
         return False
     if _rule_between(previous, line, rules):
         return False  # e.g. the border between two table rows

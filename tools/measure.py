@@ -30,7 +30,7 @@ import pymupdf
 
 from doc_translator.align import base_style, paragraph_runs
 from doc_translator.analysis import Action
-from doc_translator.pdf.read import TEXT_FLAGS
+from doc_translator.pdf.read import TEXT_FLAGS, link_key
 from doc_translator.pipeline import save, translate_document
 from doc_translator.translators import Unit, UnitTranslation
 
@@ -207,13 +207,15 @@ def _fonts(result) -> dict:
 
 
 def _integrity(original, output, input_bytes: int, output_bytes: int) -> dict:
-    def links(doc, internal: bool) -> int:
-        return sum(
-            1
+    def links(doc, internal: bool) -> set[tuple[int, str]]:
+        # What each page links to: a link drawn in pieces (one per word, or
+        # per line once the text wraps) counts once.
+        return {
+            (page.number, link_key(link))
             for page in doc
             for link in page.get_links()
             if (link["kind"] != pymupdf.LINK_URI) == internal and link["kind"] != pymupdf.LINK_NONE
-        )
+        }
 
     def images(doc) -> int:
         return len({image[0] for page in doc for image in page.get_images(full=True)})
@@ -234,8 +236,8 @@ def _integrity(original, output, input_bytes: int, output_bytes: int) -> dict:
     return {
         "drawings_lost": max(0, drawings(original) - drawings(output)),
         "images_lost": max(0, images(original) - images(output)),
-        "uri_links_lost": max(0, links(original, False) - links(output, False)),
-        "internal_links_lost": max(0, links(original, True) - links(output, True)),
+        "uri_links_lost": len(links(original, False) - links(output, False)),
+        "internal_links_lost": len(links(original, True) - links(output, True)),
         # Lines not found intact: cut in pieces or rewritten horizontally.
         "rotated_lines_lost": sum(1 for line in rotated(original) if line not in rotated(output)),
         "blank_chars": sum(_blank_chars(page) for page in output),

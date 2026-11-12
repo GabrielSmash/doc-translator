@@ -171,6 +171,23 @@ def internal_links() -> bytes:
     return doc.tobytes()
 
 
+def dark_band() -> bytes:
+    """Defect 10: white text on a black band, with no room to spare.
+
+    A longer translation that grows past the band, sideways or onto a new
+    line, lands on the white page and disappears.
+    """
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    title = "Frame Controller Parameters"
+    width = pymupdf.get_text_length(title, fontname="hebo", fontsize=11)
+    band = pymupdf.Rect(80, 100, 80 + width + 8, 116)
+    page.draw_rect(band, color=None, fill=(0, 0, 0))
+    page.insert_text((band.x0 + 4, band.y0 + 11.5), title, fontname="hebo", fontsize=11, color=(1, 1, 1))
+    page.insert_textbox(pymupdf.Rect(80, 130, 520, 220), PARAGRAPH, fontname="helv", fontsize=10)
+    return doc.tobytes()
+
+
 FIXTURES = {
     "styled_text": styled_text,
     "bordered_table": bordered_table,
@@ -178,6 +195,7 @@ FIXTURES = {
     "blank_accents": blank_accents,
     "blank_ligatures": blank_ligatures,
     "internal_links": internal_links,
+    "dark_band": dark_band,
 }
 
 

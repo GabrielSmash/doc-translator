@@ -96,3 +96,15 @@ def test_kinds_of_translated_blocks():
     assert kinds["Remove the cover."] == Kind.LIST_ITEM
     assert kinds["Overview"] == Kind.TOC_ENTRY
     assert kinds["Pin"] == kinds["Name"] == kinds["Function"] == Kind.TABLE_CELL
+
+
+def test_footnotes_are_separate_blocks_with_raised_marks():
+    page = page_with(
+        ("1", (72, 700), {"fontsize": 6}),
+        (" https://example.com/first-reference", (75, 703), {"fontsize": 9}),
+        ("2", (72, 712), {"fontsize": 6}),
+        (" Any mention of commercial products is for information only.", (75, 715), {"fontsize": 9}),
+    )
+    notes = [b for b in analyze_page(page) if b.text[0] in "12"]
+    assert [b.text[:2] for b in notes] == ["1 ", "2 "]
+    assert all(b.spans[0].superscript for b in notes)
