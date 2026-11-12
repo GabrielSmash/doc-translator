@@ -1,6 +1,6 @@
 [project]
 name = "doc-translator"
-version = "0.1.0"
+version = "0.2.0"
 description = "Translate PDF documents while preserving their original layout and formatting"
 readme = "README.md"
 license = "AGPL-3.0-or-later"

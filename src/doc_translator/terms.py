@@ -49,6 +49,34 @@ def recurring_terms(
     }
 
 
+MAX_LABEL_WORDS = 4
+
+
+def interface_labels(units) -> list[str]:
+    """Italic phrases naming parts of the software ("Network Setup",
+    "IP Address"): they stay as the screen shows them.
+
+    Manuals set screen, menu and field names in italics; so are emphasis
+    and variables, which are lowercase or single letters. A label starts
+    with a capital, has a few words of letters and recurs in the document.
+    """
+    # One italic run may list several names: "IP Address, Netmask, Gateway,".
+    names = (part.strip(" .:;()") for u in units for l in u.labels for part in re.split(r"[,;]", l))
+    labels = []
+    for label in dict.fromkeys(n for n in names if n):
+        words = label.split()
+        if not (1 <= len(words) <= MAX_LABEL_WORDS and label[0].isupper() and len(label) > 2):
+            continue
+        if not all(any(c.isalpha() for c in w) for w in words):
+            continue
+        # Written always the same way: "IP Address" is a field, but in "the
+        # IP address of the card" the same words are ordinary text.
+        found = re.findall(re.escape(label), "\n".join(u.text for u in units), re.IGNORECASE)
+        if len(found) >= MIN_OCCURRENCES and all(f == label for f in found):
+            labels.append(label)
+    return labels
+
+
 QUOTED = re.compile(r"[\"“”‘’'`]([^\"“”‘’'`]{2,60})[\"“”‘’'`]")
 
 

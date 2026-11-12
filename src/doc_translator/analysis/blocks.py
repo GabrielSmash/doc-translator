@@ -143,14 +143,16 @@ def _continues(
         return False
     if _rule_between(previous, line, rules):
         return False  # e.g. the border between two table rows
-    if _broken_by_hand(previous, line, lines):
+    if _broken_by_hand(previous, line, lines, rules):
         return False  # menu and terminal lines, two-line headers, notes
     ends_sentence = previous.text.rstrip().endswith((".", "!", "?", ":"))
     gap = block_rect.x1 - previous.bbox.x1
     return not (ends_sentence and gap > SHORT_LINE_RATIO * block_rect.width)
 
 
-def _broken_by_hand(previous: Line, line: Line, lines: list[Line]) -> bool:
+def _broken_by_hand(
+    previous: Line, line: Line, lines: list[Line], rules: list[pymupdf.Rect] | None = None
+) -> bool:
     """Would the first word of `line` have fit at the end of `previous`?
 
     Text wraps only when the next word does not fit; if it would have, the
@@ -183,6 +185,14 @@ def _broken_by_hand(previous: Line, line: Line, lines: list[Line]) -> bool:
     # next table cell) is not room.
     beside = [l for l in lines if l is not previous and abs(l.baseline - previous.baseline) < ALIGN_TOLERANCE]
     right_room = max(l.bbox.x1 for l in column) - previous.bbox.x1
+    if box := _box_around(previous, line, rules or []):
+        # Lines in a frame (a menu, a terminal screen) could use its width,
+        # up to the next vertical rule (a table cell's side), less the same
+        # margin they keep on the left.
+        sides = [r for r in rules if r.height > r.width and r.y0 <= previous.baseline <= r.y1]
+        right = min([box.x1, *(r.x0 for r in sides if r.x0 >= previous.bbox.x1)])
+        left = max([box.x0, *(r.x1 for r in sides if r.x1 <= previous.bbox.x0)])
+        right_room = max(right_room, (right - previous.bbox.x1) - (previous.bbox.x0 - left))
     if any(l.bbox.x0 >= previous.bbox.x1 - ALIGN_TOLERANCE for l in beside):
         right_room = 0
     if right_room - ALIGN_TOLERANCE >= needed:
@@ -197,6 +207,31 @@ def _broken_by_hand(previous: Line, line: Line, lines: list[Line]) -> bool:
     ):
         left_room = 0
     return left_room >= max(needed, HAND_BREAK_LEFT * span.size)
+
+
+def _box_around(previous: Line, line: Line, rules: list[pymupdf.Rect]) -> pymupdf.Rect | None:
+    """The frame the two lines sit in: the nearest rules above and below
+    covering them, of the same width, with a side rule at each end."""
+    def covers(rule: pymupdf.Rect) -> bool:
+        return rule.x0 <= previous.bbox.x0 and rule.x1 >= max(previous.bbox.x1, line.bbox.x1)
+
+    above = [r for r in rules if covers(r) and r.y1 <= previous.bbox.y0 + 1]
+    below = [r for r in rules if covers(r) and r.y0 >= line.bbox.y1 - 1]
+    if not above or not below:
+        return None
+    top = max(above, key=lambda r: r.y1)
+    bottom = min(below, key=lambda r: r.y0)
+    if abs(top.x0 - bottom.x0) > ALIGN_TOLERANCE or abs(top.x1 - bottom.x1) > ALIGN_TOLERANCE:
+        return None
+    # And sides: rules above and below alone may be the page's header and
+    # footer lines.
+    sides = [r for r in rules if r.height > r.width and r.y0 <= previous.baseline <= r.y1]
+    if not (
+        any(abs(r.x0 - top.x0) <= ALIGN_TOLERANCE for r in sides)
+        and any(abs(r.x1 - top.x1) <= ALIGN_TOLERANCE for r in sides)
+    ):
+        return None
+    return pymupdf.Rect(top.x0, top.y1, top.x1, bottom.y0)
 
 
 def _rule_between(upper: Line, lower: Line, rules: list[pymupdf.Rect]) -> bool:

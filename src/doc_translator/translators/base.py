@@ -29,6 +29,11 @@ class Unit:
 
     text: str
     segments: list[str] = field(default_factory=list)
+    # The heading of the section the paragraph is in (context for the LLM).
+    section: str = ""
+    # Phrases set in italics: names of screens, menus and fields are, in
+    # manuals ("the Network Setup menu"); see terms.interface_labels.
+    labels: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -127,7 +132,12 @@ def translate_independently(translate, units: list[Unit]) -> list[UnitTranslatio
     single call, so the backend can batch and deduplicate.
     """
     texts = [text for unit in units for text in (unit.text, *unit.segments)]
-    translations = iter(translate(texts))
+    # Text without letters (amounts, dates, codes) has nothing to translate,
+    # and the model would reformat it ("1,020" became "1.020" in some table
+    # cells and not in others, "$700" became "$700.").
+    wordy = [text for text in texts if any(c.isalpha() for c in text)]
+    translated = dict(zip(wordy, translate(wordy)))
+    translations = iter(translated.get(text, text) for text in texts)
     results = []
     for unit in units:
         text = next(translations)

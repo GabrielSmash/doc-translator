@@ -86,7 +86,12 @@ def _harmonize(
     any of them needs, rounded down to a step."""
     groups: dict[tuple, list[int]] = defaultdict(list)
     for index, placement in enumerate(placements):
-        groups[_style_key(placement.paragraph)].append(index)
+        paragraph = placement.paragraph
+        # Text the translation left as it was (numbers, names) fits where it
+        # was: shrinking it with its style would only make it smaller.
+        if "".join(r.text for r in paragraph.runs).split() == paragraph.source.text.split():
+            continue
+        groups[_style_key(paragraph)].append(index)
     for indexes in groups.values():
         # Less than half a step is a rounding difference with the original
         # (its text fitted there): that paragraph alone takes it.

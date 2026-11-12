@@ -10,7 +10,7 @@ from pathlib import Path
 import pymupdf
 
 from .align import base_style, paragraph_runs, realign, styled_segments
-from .analysis import Action, Block, analyze_page
+from .analysis import Action, Block, Kind, analyze_page
 from .fonts import FontLibrary
 from .layout import Placement, TranslatedParagraph, layout_page
 from .pdf.draw import draw_page
@@ -108,7 +108,13 @@ def _translate_document(doc: pymupdf.Document, translator: Translator, result: R
 
     # The whole document goes in one call, in reading order, so the backend
     # can batch, deduplicate and use the surrounding text as context.
-    result.units = [Unit(p.text, [s.text.strip() for s in segments]) for p, _, segments in prepared]
+    result.units = []
+    section = ""
+    for paragraph, base, segments in prepared:
+        if paragraph.kind == Kind.HEADING:
+            section = paragraph.text
+        labels = [s.text.strip() for s in segments if s.style.italic and not base.italic]
+        result.units.append(Unit(paragraph.text, [s.text.strip() for s in segments], section, labels))
     with result.timed("translate"):
         result.translations = translator.translate_units(result.units)
 

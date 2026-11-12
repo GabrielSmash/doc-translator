@@ -66,11 +66,23 @@ ollama pull qwen3:4b-instruct
 doc-translator document.pdf --engine llm
 ```
 
+Before translating, the model reads the document's headings and opening
+text and writes a short description of it (field, audience, names that stay
+as they are); every batch is sent with that description, the heading of its
+section and the preceding paragraphs.
+
+For better translations, at the cost of time, use a larger model:
+`--llm-model qwen3:8b` (on a 4 GB GPU, part of it runs on the CPU: about
+4–5 times slower).
+
 Each translation is checked; anything that fails is retried on its own and,
-if still wrong, reported in the logs:
+if still wrong, reported in the logs (the lesser of the two problems is
+kept):
 - every number of the original must be in the translation (pt-BR decimal
   commas allowed), since small models occasionally alter them;
-- implausible lengths (explanations, truncated answers) are rejected;
+- implausible lengths (explanations, truncated answers, a heading answered
+  with a sentence) are rejected;
+- text coming back in English is retried;
 - casing copied from neighboring items is undone.
 
 ### Glossary
@@ -84,6 +96,10 @@ if still wrong, reported in the logs:
 
 `keep` terms stay in English; `terms` always get the given translation. With
 the `llm` engine your glossary is merged with the one built automatically.
+
+Both engines also keep in English the names the document sets in italics and
+always writes the same way, as manuals do with screens, menus and fields
+("the *Network Setup* menu").
 
 ### GPU for the fast engine
 
@@ -102,8 +118,9 @@ analyze  → every line goes into one block with a kind (paragraph, heading,
 translate→ fast: sentence by sentence; llm: glossary + batches in reading order
 align    → bold/italic/links are mapped onto the translated text
 layout   → where each translation goes: down to the letters of the next
-           element, inside the colored area it sits on, reusing the embedded
-           fonts when they contain every needed glyph
+           element, inside the colored area it sits on, up to 10% wider into
+           free space; text of one style on a page shares one size; embedded
+           fonts are reused when they contain every needed glyph
 draw     → original text removed, translations written, links recreated
            over the translated words (internal links too)
 ```
@@ -111,7 +128,8 @@ draw     → original text removed, translations written, links recreated
 ## Known limitations
 
 - Portuguese is longer than English: when there is no free space around a
-  paragraph, its font is reduced to fit.
+  paragraph, its font is reduced to fit, and the text of the same style on
+  that page with it (in 5% steps), so sizes stay uniform.
 - Subset fonts (the most common case) cannot draw letters the original
   text didn't use, so a font with the same metrics (Times, Helvetica or
   Courier) is used instead.

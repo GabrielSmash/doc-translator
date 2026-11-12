@@ -66,6 +66,8 @@ class Report:
 
         chars = translated = 0
         for unit, translation in zip(result.units, result.translations):
+            if not any(c.isalpha() for c in unit.text):
+                continue  # amounts, dates: nothing to translate
             count = sum(c.isalnum() for c in unit.text)
             chars += count
             if translation.text.strip() != unit.text.strip():

@@ -95,7 +95,8 @@ class CachedTranslator:
             translator.keep_progress(cache.namespace("texts|" + name))
 
     def translate_units(self, units: list[Unit]) -> list[UnitTranslation]:
-        keys = [json.dumps([u.text, u.segments], ensure_ascii=False) for u in units]
+        # Labels decide which words stay untranslated, so they are part of the key.
+        keys = [json.dumps([u.text, u.segments, u.labels], ensure_ascii=False) for u in units]
         found = self.store.get_many(keys)
         missing = {k: u for k, u in zip(keys, units) if k not in found}
         if found:

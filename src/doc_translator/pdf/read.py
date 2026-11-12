@@ -103,11 +103,12 @@ def graphic_areas(page: pymupdf.Page) -> list[pymupdf.Rect]:
         only_strokes = all(item[0] == "l" for item in drawing["items"])
         if not only_strokes and rect.height >= 1.5 and rect.width >= 1.5:
             rects.append(rect)
-        rects += _column_rules(drawing)
+        rects += column_rules(drawing)
     return rects
 
 
-def _column_rules(drawing: dict) -> list[pymupdf.Rect]:
+def column_rules(drawing: dict) -> list[pymupdf.Rect]:
+    """Vertical rules of a drawing: lines, or rectangles thinner than 1.5 pt."""
     rules = []
     for item in drawing["items"]:
         if item[0] == "l":

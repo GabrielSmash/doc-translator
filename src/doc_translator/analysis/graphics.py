@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 import pymupdf
 
+from ..pdf.read import column_rules
 from .model import Line, Span
 
 
@@ -40,11 +41,13 @@ def separating_rules(lines: list[Line], drawings: list[dict]) -> list[pymupdf.Re
     """Mark the underlined spans of `lines`; return the rules between lines.
 
     Rules are the strokes that are not underlines, plus the top and bottom
-    edges of filled areas (a table header on a dark band).
+    edges of filled areas (a table header on a dark band), plus vertical
+    rules (the sides of table cells and frames).
     """
     strokes = horizontal_lines(drawings)
     underlines = _mark_underlines(lines, strokes, drawings)
-    return [s.rect for s in strokes if s not in underlines] + _fill_edges(drawings)
+    verticals = [rule for drawing in drawings for rule in column_rules(drawing)]
+    return [s.rect for s in strokes if s not in underlines] + _fill_edges(drawings) + verticals
 
 
 def _fill_edges(drawings: list[dict]) -> list[pymupdf.Rect]:

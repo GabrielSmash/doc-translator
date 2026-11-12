@@ -16,8 +16,14 @@ class FakeLLM(LLMTranslator):
         self._progress = None
         self.cache_id = "llm|fake"
         self._all_layers_on_gpu = False
+        self._brief = ""
+        self._sections = {}
         self.answers = iter(answers)
         self.prompts: list[list[dict]] = []
+        self.brief = None  # None: skip the description call
+
+    def _describe(self, units):
+        return super()._describe(units) if self.brief is not None else ""
 
     def _chat(self, messages, schema=None, max_tokens=1024):
         self.prompts.append(messages)
@@ -34,6 +40,9 @@ def test_plausible_rejects_explanations_and_empty_answers():
     assert _plausible(source, "Conecte o cabo à porta serial.")
     assert not _plausible(source, "")
     assert not _plausible(source, "Claro! " + "Aqui está a tradução detalhada. " * 10)
+    # A heading answered with the next paragraph's translation.
+    assert _plausible("IP Address", "Endereço IP")
+    assert not _plausible("IP Address", "Este controle define o endereço IP único do 7700FC dentro da rede.")
 
 
 def test_batches_respect_size_limits():
@@ -183,3 +192,70 @@ def test_prompts_follow_the_language_pair():
     system, user = llm.prompts[0]
     assert "English to European Portuguese (pt-PT)" in system["content"]
     assert "into European Portuguese" in " ".join(user["content"].split())
+
+
+def test_prompts_carry_the_document_brief_and_the_section():
+    llm = FakeLLM(["A manual for a video frame controller.", json.dumps({"translations": ["Reinicie."]})])
+    llm.brief = True
+    llm.translate_units([Unit("Restart the card.", section="Upgrading the Firmware")])
+    user = llm.prompts[1][1]["content"]
+    assert "A manual for a video frame controller." in user
+    assert "Section: Upgrading the Firmware" in user
+
+
+def test_italic_labels_that_recur_stay_untranslated():
+    from doc_translator.terms import interface_labels
+
+    units = [
+        Unit("Open the Network Setup menu.", labels=["Network Setup"]),
+        Unit("The Network Setup menu has six parameters.", labels=["Network Setup", "must"]),
+        Unit("Set the value to yes.", labels=["yes"]),
+        Unit("The IP Address and Gateway are assigned.", labels=["IP Address, Gateway,"]),
+        Unit("Enter the IP Address and Gateway.", labels=["IP Address", "Gateway"]),
+        Unit("Each card has a Gateway; the gateway routes packets.", labels=["Gateway"]),
+    ]
+    # Lowercase emphasis ("must", "yes") is not a name; a list is split; a
+    # name also written in lowercase ("gateway") is an ordinary word.
+    assert interface_labels(units) == ["Network Setup", "IP Address"]
+    translations = [
+        "Abra o menu Network Setup.",
+        "O menu Network Setup tem seis parâmetros.",
+        "Defina o valor como yes.",
+        "O IP Address e o Gateway são atribuídos.",
+        "Insira o IP Address e o Gateway.",
+        "Cada placa tem um gateway; o gateway encaminha pacotes.",
+    ]
+    llm = FakeLLM([json.dumps({"translations": translations})])
+    llm.translate_units(units)
+    assert '"Network Setup": keep in English' in llm.prompts[0][1]["content"]
+
+
+def test_a_worse_retry_does_not_replace_the_batch_translation():
+    glossary = Glossary(terms={"Frame Controller": "controlador de quadro"})
+    source = "Disable DHCP before upgrading the Frame Controller firmware."
+    llm = FakeLLM(
+        [
+            json.dumps({"translations": ["Desative o DHCP antes de atualizar o firmware do Frame Controller."]}),
+            source,  # the retry comes back in English
+        ],
+        glossary=glossary,
+    )
+    results = llm.translate_units([Unit(source)])
+    assert results[0].text.startswith("Desative")
+
+
+def test_untranslated_text_is_detected_but_names_are_not():
+    from doc_translator.translators.llm import _untranslated
+
+    source = "Subsequently, the 7700FC should also be upgraded with the latest information."
+    assert _untranslated(source, source)
+    assert _untranslated(source, "Subsequentemente, the 7700FC should also be upgraded with the latest information.")
+    assert not _untranslated(source, "Em seguida, o 7700FC também deve ser atualizado com as informações recentes.")
+    assert not _untranslated("**** SNMP Setup ****", "**** SNMP Setup ****")
+    assert not _untranslated("Trap #1: 192.168.1.76 Trap #2: 192.168.8.140", "Trap #1: 192.168.1.76 Trap #2: 192.168.8.140")
+    for text in ["http://www.evertz.com", "Type: put<space><<firmwarelocation>>.bin<space>app<Enter>"]:
+        assert not _untranslated(text, text)
+    # Quoted terms kept, the rest translated.
+    assert not _untranslated(
+        "Changed “route” to “gateway” throughout manual", "Alterado 'route' para 'gateway' em todo o manual"
+    )

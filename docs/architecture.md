@@ -225,6 +225,7 @@ Each phase leaves the tool working and has a number to move.
 | 3 ✅ | Model with kinds and actions; `extract.py` split | Every line of every corpus page belongs to one block |
 | 4 ✅ | `layout.py` separated from drawing; defects 1, 5, 10 (6 done in phase 3) | Identity run keeps full size in at least 98% of paragraphs |
 | 5 ✅ | Defect 8; `LanguagePair`; PyPI | Styles carried over on the LLM engine match the fast engine |
+| 6 ✅ | Reading review: layout harmonized, translation context | Pages read as ordered; menus and screens keep their lines |
 
 Phase 0 comes first because every later phase is judged by it. Phase 1 comes
 before the restructuring because those defects corrupt content today and
@@ -313,6 +314,33 @@ differently inside the paragraph ("Type:" alone is "Tipo:", in the sentence
 placed in the paragraphs' batches, or given their paragraph as context, were
 tried first: the model then copied whole paragraphs untranslated (6 instead
 of 1 on pages 15 to 17), so they are translated apart.
+
+### Phase 6 results
+
+Reading the translated corpus showed what the metrics did not: pages looked
+disordered (each paragraph reduced on its own, to its own size), lines of
+menus and terminal screens were joined into one paragraph, and the LLM
+translated names of menus and lacked context.
+
+| Change | Measured / seen |
+|---|---|
+| A line ends its paragraph when the next line's first word would have fit on it (measured in Helvetica, so justified text is not split), when columns are aligned with spaces, or inside a frame (rules above, below and on both sides) with room left | Manual: menus, terminal screens, two-line headers and notes after list items keep their lines. Corpus: the remaining new breaks were checked one by one (author lists, table cells) |
+| Text of one style on a page shares one size, rounded down to 5% steps; below 85% a paragraph shrinks alone; text the translation left unchanged keeps its size | Pages read as uniform. Full-size shares under pseudo-translation drop by design (arXiv 87.6% to 62.8%); identity runs unchanged |
+| Before shrinking, paragraphs may grow 10% sideways (3% first); vertical rules bound that growth | IRS: text no longer crosses the column rules of the form |
+| Text without letters is not sent to the fast engine | IRS page 4: Opus-MT turned "1,020" into "1.020" in some cells and "$700" into "$700." |
+| LLM: a description of the document (written once by the model from its headings and opening text), the section heading and three preceding paragraphs go with every batch | Manual pages 15 to 17: fluent text, "Network Setup" and "SNMP Setup" kept |
+| Italic names written always the same way recur in the document: kept in English by both engines | "Network Setup" kept; "IP address" in running text still translated |
+| LLM checks: a short text answered with a sentence (a shifted batch) and text left mostly in English are rejected; of the batch answer and the retry, the lesser problem is kept | A heading "IP Address" had received the next paragraph's translation |
+
+Models compared on manual pages 15 to 17 (GTX 1650 Ti, 4 GB):
+
+| Model | Time | Notes |
+|---|---|---|
+| `qwen3:4b-instruct` (default) | 104 s | good; occasional wrong words |
+| `qwen3:8b` | 487 s | best wording and terminology; does not fit the GPU |
+| `translategemma:4b` | 278 s | fluent, but ignores the glossary ("Network Setup" translated, "traps" as "armadilhas") |
+
+The default stays; `qwen3:8b` is documented for better quality.
 
 ## 6. Open decisions
 

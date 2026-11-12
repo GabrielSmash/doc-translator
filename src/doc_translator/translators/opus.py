@@ -9,6 +9,7 @@ import ctranslate2
 import sentencepiece as spm
 
 from ..languages import EN_PT_BR, LanguagePair
+from ..terms import interface_labels
 from .base import Glossary, Unit, UnitTranslation, protect, restore, translate_independently
 from .cache import glossary_id
 from .checks import NUMBER, lost_numbers
@@ -68,7 +69,16 @@ class OpusTranslator:
         self._load("cpu")
 
     def translate_units(self, units: list[Unit]) -> list[UnitTranslation]:
-        return translate_independently(self.translate, units)
+        # Names of screens and fields, set in italics by the document, are
+        # kept like the glossary's terms, for this document only.
+        labels = interface_labels(units)
+        user = self.glossary
+        if labels:
+            self.glossary = Glossary(keep=labels).merged(user or Glossary())
+        try:
+            return translate_independently(self.translate, units)
+        finally:
+            self.glossary = user
 
     def translate(self, texts: list[str]) -> list[str]:
         # Flatten every text into sentences, translate unique sentences once,

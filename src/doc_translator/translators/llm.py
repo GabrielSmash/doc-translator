@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 
 from ..languages import EN_PT_BR, LanguagePair
-from ..terms import quoted_terms, recurring_terms
+from ..terms import interface_labels, quoted_terms, recurring_terms
 from .base import Glossary, Unit, UnitTranslation
 from .cache import glossary_id
 from .checks import NUMBER, lost_numbers
@@ -28,7 +28,10 @@ from .checks import NUMBER, lost_numbers
 log = logging.getLogger(__name__)
 
 DEFAULT_HOST = "http://localhost:11434"
-CONTEXT_UNITS = 2  # preceding paragraphs shown as context
+CONTEXT_UNITS = 3  # preceding paragraphs shown as context
+# How much of the document the model reads to describe it: its headings and
+# its opening text, up to this many characters.
+BRIEF_CHARS = 3000
 EXAMPLE_CHARS = 160  # usage example shown with each glossary term
 # Batches trade prompt overhead (instructions/context repeated per call)
 # against the cost of a bad answer, which sends the whole batch to retry.
@@ -68,6 +71,16 @@ Terms, each with an example of use:
 {terms}"""
 TERM_LINE = re.compile(r"^\s*[-*\d.]*\s*(.+?)\s*=>\s*(.+?)\s*$")
 
+# Written once per document and shown with every batch: a paragraph alone
+# does not say whether "Setup" is a menu or "frame" a video frame.
+BRIEF_PROMPT = """Below are the headings and the opening text of a document \
+that will be translated. In at most 5 short lines, in {source}, describe: what \
+the document is and its field; who it is written for; the names that must stay \
+as they are (products, and screens, menus, buttons or fields of the software); \
+the meaning that ambiguous words have in it. No preamble.
+
+{excerpt}"""
+
 BATCH_PROMPT = """Translate each item of the JSON array below into \
 {target}. Answer with {{"translations": [...]}}: exactly {count} strings, \
 in the same order, one per item.
@@ -100,6 +113,8 @@ class LLMTranslator:
         # memory.
         self._all_layers_on_gpu = True
         self._progress = None
+        self._brief = ""
+        self._sections: dict[str, str] = {}
         digest = self._check_model()
         # The digest changes when `ollama pull` brings a new version.
         self.cache_id = f"llm|{model}|{digest}|{languages.target_code}|{glossary_id(glossary)}"
@@ -110,7 +125,16 @@ class LLMTranslator:
         self._progress = store
 
     def translate_units(self, units: list[Unit]) -> list[UnitTranslation]:
-        glossary = self._build_glossary(units).merged(self.user_glossary)
+        glossary = self._build_glossary(units)
+        # Names of screens and fields, set in italics by the document.
+        for label in interface_labels(units):
+            glossary.terms.pop(label, None)
+            if label not in glossary.keep:
+                glossary.keep.append(label)
+        glossary = glossary.merged(self.user_glossary)
+        self._brief = self._describe(units)
+        for unit in units:
+            self._sections.setdefault(unit.text, unit.section)
         paragraphs = [u.text for u in units]
         self._translate_all(paragraphs, glossary, with_context=True)
         # Styled phrases on their own, after the paragraphs, as the fast
@@ -149,6 +173,23 @@ class LLMTranslator:
                 self._progress.put_many(translated)
             done += len(batch)
             log.info("Translated %d/%d %s", done, len(first_seen), "paragraphs" if with_context else "styled phrases")
+
+    def _describe(self, units: list[Unit]) -> str:
+        """A few lines on what the document is, for every batch's prompt."""
+        headings = list(dict.fromkeys(u.section for u in units if u.section))
+        excerpt = "Headings:\n" + "\n".join(headings) + "\n\nText:\n"
+        excerpt += "\n".join(u.text for u in units if u.text not in headings)
+        excerpt = excerpt[:BRIEF_CHARS]
+        try:
+            brief = self._chat(
+                [{"role": "user", "content": self._format(BRIEF_PROMPT, excerpt=excerpt)}],
+                max_tokens=200,
+            )
+        except LLMError as error:
+            log.warning("Could not describe the document (%s); continuing without it", error)
+            return ""
+        log.info("Document: %s", " ".join(brief.split()))
+        return brief.strip()
 
     # -- glossary ------------------------------------------------------------
 
@@ -217,8 +258,15 @@ class LLMTranslator:
             if _problems(text, translation, glossary):
                 # Context for a lone retry: whatever preceded it in the batch.
                 previous = (context + texts[:index])[-CONTEXT_UNITS:]
-                translation = self._translate_one(text, previous, glossary)
-            results.append(translation)
+                retry = self._translate_one(text, previous, glossary)
+                # The retry can be worse (left in English where the batch
+                # only missed a glossary term): keep the lesser problem.
+                translation = min(
+                    [translation, retry], key=lambda t: _severity(text, t, glossary)
+                )
+                if problems := _problems(text, translation, glossary):
+                    log.warning("Check translation of %r (%s): %r", text[:50], problems, translation[:80])
+            results.append(translation or text)
         return results
 
     def _translate_one(self, text: str, context: list[str], glossary: Glossary) -> str:
@@ -232,17 +280,19 @@ class LLMTranslator:
                 dict.fromkeys(numbers)
             )
         translation = _clean(self._chat(prompt, max_tokens=64 + len(text)), text)
-        translation = self._match_case(text, translation)
-        if problems := _problems(text, translation, glossary):
-            log.warning("Check translation of %r (%s): %r", text[:50], problems, translation[:80])
-        return translation or text
+        return self._match_case(text, translation)
 
     def _prompt(
         self, task: str, texts: list[str], context: list[str], glossary: Glossary
     ) -> list[dict]:
         parts = []
+        if self._brief:
+            parts.append(f"About the document (context only):\n{self._brief}")
         if terms := glossary.relevant("\n".join(texts), self.languages.source):
             parts.append(f"Glossary:\n{terms}")
+        section = self._sections.get(texts[0], "") if texts else ""
+        if section and section not in texts:
+            parts.append(f"Section: {section}")
         if context:
             parts.append("Preceding text (context only, do not translate):\n" + "\n".join(context))
         parts.append(task)
@@ -347,15 +397,47 @@ def _clean(answer: str, source: str) -> str:
 
 def _problems(source: str, translation: str, glossary: Glossary | None = None) -> str:
     """Why a translation can't be trusted, or "" if it looks fine."""
+    return _check(source, translation, glossary)[1]
+
+
+def _severity(source: str, translation: str, glossary: Glossary | None = None) -> int:
+    """0 for a translation that looks fine; higher is worse."""
+    return _check(source, translation, glossary)[0]
+
+
+# A text with this many ordinary words (lowercase, 3+ letters) whose words
+# mostly come back unchanged was not translated, in whole or in part.
+UNTRANSLATED_WORDS = 6
+UNTRANSLATED_SHARE = 0.6
+
+
+def _ordinary_words(text: str) -> list[str]:
+    """Lowercase words of letters only: not names, codes, URLs or commands."""
+    words = (token.strip(".,;:!?()[]\"'“”‘’«»") for token in text.split())
+    return [w for w in words if len(w) >= 3 and w.isalpha() and w.islower()]
+
+
+def _untranslated(source: str, translation: str) -> bool:
+    """Names, codes and numbers stay as they are; sentences must not."""
+    words = _ordinary_words(source)
+    if len(words) < UNTRANSLATED_WORDS:
+        return False
+    kept = set(_ordinary_words(translation))
+    return sum(w in kept for w in words) > UNTRANSLATED_SHARE * len(words)
+
+
+def _check(source: str, translation: str, glossary: Glossary | None) -> tuple[int, str]:
     if not _plausible(source, translation):
-        return "empty or unexpected length"
+        return 4, "empty or unexpected length"
+    if _untranslated(source, translation):
+        return 3, "left untranslated"
     # Small models sometimes alter numbers ("RS-232" -> "RS-230"): in a
     # technical document that is worse than an awkward sentence.
     if missing := lost_numbers(source, translation):
-        return "numbers changed: " + ", ".join(sorted(missing))
+        return 2, "numbers changed: " + ", ".join(sorted(missing))
     if glossary and (terms := glossary.violations(source, translation)):
-        return "terminology not followed: " + ", ".join(terms)
-    return ""
+        return 1, "terminology not followed: " + ", ".join(terms)
+    return 0, ""
 
 
 def _excerpt(text: str, term: str) -> str:
@@ -409,8 +491,16 @@ def _match_case(
     return re.sub(r"\w+", fix, translation)
 
 
+# Short texts (headings, labels) vary more in length, but not by a sentence:
+# a heading answered with a whole sentence is an answer shifted in the batch.
+SHORT_TEXT = 20
+SHORT_TEXT_SLACK = 25
+
+
 def _plausible(source: str, translation: str) -> bool:
     if not translation:
         return False
+    if len(source) < SHORT_TEXT:
+        return len(translation) <= len(source) * MAX_LENGTH_RATIO + SHORT_TEXT_SLACK
     ratio = len(translation) / max(1, len(source))
-    return MIN_LENGTH_RATIO <= ratio <= MAX_LENGTH_RATIO or len(source) < 20
+    return MIN_LENGTH_RATIO <= ratio <= MAX_LENGTH_RATIO
