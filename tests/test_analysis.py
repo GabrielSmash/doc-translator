@@ -108,3 +108,19 @@ def test_footnotes_are_separate_blocks_with_raised_marks():
     notes = [b for b in analyze_page(page) if b.text[0] in "12"]
     assert [b.text[:2] for b in notes] == ["1 ", "2 "]
     assert all(b.spans[0].superscript for b in notes)
+
+
+def test_reference_numbers_are_kept_out_of_the_translation():
+    page = page_with(
+        ("[33] Nitish Srivastava and Geoffrey Hinton. Dropout.", (72, 72), {}),
+        ("as in ByteNet and the models of", (72, 120), {}),
+        ("[16] and ConvS2S, all of which use convolution.", (72, 132), {}),
+        ("[2] ", (72, 300), {}),  # number alone in a table cell
+    )
+    blocks = analyze_page(page)
+    reference = next(b for b in blocks if "Srivastava" in b.text)
+    assert reference.prefix == "[33] "
+    assert reference.text.startswith("Nitish")
+    # A citation starting a line of running text stays in its paragraph.
+    running = next(b for b in blocks if "ByteNet" in b.text)
+    assert "[16] and ConvS2S" in running.text and running.prefix == ""

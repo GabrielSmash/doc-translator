@@ -14,6 +14,11 @@ LEADER = re.compile(r"\s*(?:[.·…]\s?){4,}\s*(\d+|[ivxlcdm]+)?\s*$", re.IGNORE
 LIST_MARKER = re.compile(rf"^\s*{MARKER}\s+")
 MARKER_ONLY = re.compile(rf"^\s*{MARKER}\s*$")
 SYMBOL_FONTS = ("symbol", "wingdings", "dingbats", "webdings")
+# Number of a bibliography entry: "[33] Nitish Srivastava, ...". Unlike a
+# list marker it does not start a block on its own, since running text can
+# wrap with a citation first ("[16] and ConvS2S [9]").
+# Followed by text: a number alone in its cell is left as it is.
+REFERENCE = re.compile(r"^\s*\[\d{1,3}\]\s+(?=\S)")
 FOOTNOTE_MARK = re.compile(r"^\s*(?:\d{1,3}|[*†‡§¶])\s*$")
 # A footnote mark is set this much smaller than the note's text, at most.
 FOOTNOTE_SIZE_RATIO = 0.85
@@ -76,7 +81,8 @@ def split_block(
             paragraphs.append(target)
             blocks.append(target)
             starts.append((line.baseline, line.bbox.x0))
-            if marker := LIST_MARKER.match(line.text):
+            # Kept out of the translation, which may drop it ("[33]" was lost).
+            if marker := LIST_MARKER.match(line.text) or REFERENCE.match(line.text):
                 target.prefix = _strip_prefix(line, marker.end())
         if leader := LEADER.search(line.text):
             target.leader = _strip_leader(line, leader)
