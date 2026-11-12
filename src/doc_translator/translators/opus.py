@@ -9,6 +9,7 @@ import ctranslate2
 import sentencepiece as spm
 
 from .base import Glossary, Unit, UnitTranslation, protect, restore, translate_independently
+from .cache import glossary_id
 from .checks import NUMBER, lost_numbers
 
 log = logging.getLogger(__name__)
@@ -35,6 +36,8 @@ class OpusTranslator:
         self.source_sp = spm.SentencePieceProcessor(str(model_dir / "source.spm"))
         self.target_sp = spm.SentencePieceProcessor(str(model_dir / "target.spm"))
         self.model_dir = model_dir
+        # A Hugging Face snapshot directory is named after its revision.
+        self.cache_id = f"opus|{model_dir.resolve()}|{target_token}|{glossary_id(glossary)}"
         self._unknown_cache: dict[str, bool] = {}
         if device == "auto":
             self._load_auto()

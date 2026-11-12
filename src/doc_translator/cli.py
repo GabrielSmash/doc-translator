@@ -6,8 +6,10 @@ from pathlib import Path
 from huggingface_hub import snapshot_download
 from huggingface_hub.errors import HfHubHTTPError, LocalEntryNotFoundError
 
-from .pipeline import translate_pdf
+from .pipeline import DocumentError, translate_pdf
+from .report import Report
 from .translators.base import Glossary
+from .translators.cache import CachedTranslator, TranslationCache, default_path
 from .translators.llm import DEFAULT_HOST, LLMError, LLMTranslator
 from .translators.opus import OpusTranslator
 
@@ -43,6 +45,12 @@ def main() -> None:
     parser.add_argument(
         "--model", type=Path, help=f"local CTranslate2 model dir (default: download {MODEL_REPO})"
     )
+    parser.add_argument("--report", type=Path, metavar="FILE", help="write what the run changed, as JSON")
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help=f"translate everything again instead of reusing earlier translations ({default_path()})",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -69,8 +77,24 @@ def main() -> None:
         if not (model_dir / "model.bin").is_file():
             sys.exit(f"error: no CTranslate2 model (model.bin) in {model_dir}")
         translator = OpusTranslator(model_dir, PT_BR_TOKEN, args.device, glossary)
-    translate_pdf(args.input, output, translator)
+    if not args.no_cache:
+        translator = CachedTranslator(translator, TranslationCache(default_path()))
+    try:
+        result = translate_pdf(args.input, output, translator)
+    except (LLMError, KeyboardInterrupt) as error:
+        reason = "interrupted" if isinstance(error, KeyboardInterrupt) else f"error: {error}"
+        resume = "" if args.no_cache else "\nParagraphs already translated were saved; run again to resume."
+        sys.exit(f"{reason}{resume}")
+    except DocumentError as error:
+        sys.exit(f"error: {args.input}: {error}")
+
+    report = Report.from_result(result, args.input, output)
     print(f"Saved {output}")
+    print(report.summary())
+    if args.report:
+        report.write(args.report)
+    if report.failed_pages:
+        sys.exit(1)
 
 
 def _download_model() -> Path:

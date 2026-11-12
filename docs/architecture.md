@@ -221,7 +221,7 @@ Each phase leaves the tool working and has a number to move.
 |---|---|---|
 | 0 ✅ | Harness, fixtures and corpus in the repository; CI | The audit numbers are reproduced by one command |
 | 1 ✅ | Defects 3 and 2 (content corruption), 7 and 9 (small); 4 moved here | No blank characters on the NIST report; tables on manual pages 17 and 29 intact |
-| 2 | Report and CLI summary; per-page isolation; translation cache | A run states what it changed; a layout experiment does not re-translate |
+| 2 ✅ | Report and CLI summary; per-page isolation; translation cache | A run states what it changed; a layout experiment does not re-translate |
 | 3 | Model with kinds and actions; `extract.py` split | Every line of every corpus page belongs to one block |
 | 4 | `layout.py` separated from drawing; defects 1, 5, 6, 10 | Identity run keeps full size in at least 98% of paragraphs |
 | 5 | Defect 8; `LanguagePair`; PyPI | Styles carried over on the LLM engine match the fast engine |
@@ -230,6 +230,21 @@ Phase 0 comes first because every later phase is judged by it. Phase 1 comes
 before the restructuring because those defects corrupt content today and
 their fixes are local. Defect 1 waits for phase 4: it changes how every
 paragraph is placed, which is the highest regression risk in the plan.
+
+### Phase 2 results
+
+| Change | Where | Measured |
+|---|---|---|
+| Report: per page paragraphs, reduced, not fitted, error; share of text translated; fonts kept and replaced; warnings logged during the run. Printed as a summary, `--report FILE` writes JSON | `report.py`, `cli.py` | Reference manual: 286 reduced paragraphs on 29 pages and all 9 fonts replaced, now visible without `-v` |
+| Per-page isolation for reading and drawing: the page is restored from a copy taken before drawing and reported; exit code 1 | `pipeline.py` | Tests force a failure in each stage |
+| Translation cache in SQLite, per engine, model, glossary and version; the LLM engine also saves each batch | `translators/cache.py`, `llm.py` | Manual, fast engine: translation 8.2 s → 0 s on the second run, same text. NIST, LLM engine interrupted after 24 of 31 paragraphs: the next run translated only 7 |
+| Unusable documents refused with a clear message: not a PDF, password, no text layer | `pipeline.py` | |
+
+Deviations from the plan: `translate_pdf` still returns `Result` (the
+harness needs every stage's output) and the CLI builds the `Report` from it.
+The cache lives in `translators/` until phase 3 moves the package. A
+translation error still stops the run, since it concerns the whole document,
+but with the cache the next run resumes instead of starting over.
 
 ## 6. Open decisions
 

@@ -77,7 +77,11 @@ class FontLibrary:
             if not buffer:
                 log.info("Font %s: cannot be extracted, using fallback", name)
                 continue
-            prepared = _prepare(buffer, chars, name)
+            try:
+                prepared = _prepare(buffer, chars, name)
+            except Exception as error:  # a damaged font must not stop the document
+                log.warning("Font %s: cannot be read (%s), using fallback", name, error)
+                continue
             if prepared is not None:
                 library._add(name, prepared, ext)
         return library
@@ -96,6 +100,11 @@ class FontLibrary:
                 )
         self._families[name] = family
         log.info("Font %s: reusing embedded font", name)
+
+    @property
+    def reused(self) -> list[str]:
+        """Names of the source fonts whose embedded file is reused."""
+        return list(self._families)
 
     @property
     def css(self) -> str:

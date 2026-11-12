@@ -35,7 +35,20 @@ and cached.
 | `--model DIR` | `fast` engine: local CTranslate2 model instead of downloading one |
 | `--llm-model NAME` | `llm` engine: Ollama model (default `qwen3:4b-instruct`) |
 | `--ollama-host URL` | `llm` engine: Ollama server (default `http://localhost:11434`) |
+| `--report FILE` | write what the run changed (per page, fonts, warnings) as JSON |
+| `--no-cache` | translate everything again instead of reusing earlier translations |
 | `-v` | verbose logs (glossary, fonts used, text that had to shrink...) |
+
+At the end of a run a summary states what changed: the share of the text
+translated, which pages had paragraphs drawn smaller, which fonts were
+replaced and how many warnings were logged. If a page cannot be processed it
+is kept in the original language, listed in the summary, and the exit code
+is 1.
+
+Translations are cached in `~/.cache/doc-translator/translations.sqlite`
+(per engine, model, glossary and version): running a document again does not
+translate it again, and an interrupted `llm` run (Ctrl+C, Ollama down)
+resumes where it stopped.
 
 ### LLM engine
 
@@ -91,7 +104,9 @@ render   → original text removed, translation written in the same area,
   Courier) is used instead.
 - Rows of tightly packed tables are drawn slightly smaller than the original.
 - Monospaced text (code, terminal output) is not translated.
-- Scanned PDFs (images without text) are not supported.
+- Scanned PDFs (images without text) are not supported: run OCR on them first
+  (e.g. [OCRmyPDF](https://ocrmypdf.readthedocs.io)). Password-protected PDFs
+  are refused too.
 
 ## Development
 

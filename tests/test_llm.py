@@ -11,6 +11,8 @@ class FakeLLM(LLMTranslator):
         self.model = "fake"
         self.user_glossary = glossary or Glossary()
         self._cache = {}
+        self._progress = None
+        self.cache_id = "llm|fake"
         self._all_layers_on_gpu = False
         self.answers = iter(answers)
         self.prompts: list[list[dict]] = []
@@ -149,3 +151,24 @@ def test_terminology_violation_triggers_retry():
     results = llm.translate_units([Unit("Restart the Frame Controller.")])
     assert results[0].text == "Reinicie o controlador de quadro."
     assert "Mandatory terminology" in llm.prompts[1][0]["content"]
+
+
+def test_interrupted_run_resumes_from_saved_progress():
+    class Store(dict):
+        def get_many(self, texts):
+            return {t: self[t] for t in texts if t in self}
+
+        def put_many(self, entries):
+            self.update(entries)
+
+    store = Store({"Connect the power cable.": "Conecte o cabo de alimentação."})
+    llm = FakeLLM([json.dumps({"translations": ["Ligue o aparelho."]})])
+    llm.keep_progress(store)
+
+    result = llm.translate_units([Unit("Connect the power cable."), Unit("Turn on the device.")])
+
+    assert [r.text for r in result] == ["Conecte o cabo de alimentação.", "Ligue o aparelho."]
+    # Only the new paragraph is translated (the saved one is just context).
+    assert len(llm.prompts) == 1
+    assert llm.prompts[0][-1]["content"].endswith('[\n"Turn on the device."\n]')
+    assert store["Turn on the device."] == "Ligue o aparelho."  # saved as it goes

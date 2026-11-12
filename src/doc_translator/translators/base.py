@@ -111,6 +111,10 @@ def _stem(word: str) -> str:
 
 
 class Translator(Protocol):
+    # Identifies everything that changes the output (engine, model, target
+    # language, glossary), so cached translations are reused only when valid.
+    cache_id: str
+
     def translate_units(self, units: list[Unit]) -> list[UnitTranslation]: ...
 
 

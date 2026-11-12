@@ -20,6 +20,7 @@ import urllib.request
 
 from ..terms import quoted_terms, recurring_terms
 from .base import Glossary, Unit, UnitTranslation
+from .cache import glossary_id
 from .checks import NUMBER, lost_numbers
 
 log = logging.getLogger(__name__)
@@ -103,7 +104,15 @@ class LLMTranslator:
         # generation ~1.75x faster on a 4 GB card. Dropped if it runs out of
         # memory.
         self._all_layers_on_gpu = True
-        self._check_model()
+        self._progress = None
+        digest = self._check_model()
+        # The digest changes when `ollama pull` brings a new version.
+        self.cache_id = f"llm|{model}|{digest}|{glossary_id(glossary)}"
+
+    def keep_progress(self, store) -> None:
+        """Save each translated batch to `store` (a cache namespace) and
+        skip the paragraphs it already holds."""
+        self._progress = store
 
     def translate_units(self, units: list[Unit]) -> list[UnitTranslation]:
         glossary = self._build_glossary(units).merged(self.user_glossary)
@@ -116,14 +125,22 @@ class LLMTranslator:
             if any(c.isalpha() for c in text):
                 first_seen.setdefault(text, index)
         pending = list(first_seen)
-        done = 0
+        if self._progress is not None:
+            resumed = self._progress.get_many(pending)
+            self._cache.update(resumed)
+            if resumed:
+                log.info("Resuming: %d paragraphs translated by an earlier run", len(resumed))
+        done = sum(text in self._cache for text in pending)
+        pending = [text for text in pending if text not in self._cache]
         for batch in _batches(pending):
             start = first_seen[batch[0]]
             context = texts[max(0, start - CONTEXT_UNITS) : start]
-            for text, translation in zip(batch, self._translate_batch(batch, context, glossary)):
-                self._cache[text] = translation
+            translated = dict(zip(batch, self._translate_batch(batch, context, glossary)))
+            self._cache.update(translated)
+            if self._progress is not None:
+                self._progress.put_many(translated)
             done += len(batch)
-            log.info("Translated %d/%d paragraphs", done, len(pending))
+            log.info("Translated %d/%d paragraphs", done, len(first_seen))
 
         translations = [self._cache.get(text, text) for text in texts]
         segments = self._locate_all(units, translations)
@@ -283,14 +300,16 @@ class LLMTranslator:
 
     # -- Ollama --------------------------------------------------------------
 
-    def _check_model(self) -> None:
+    def _check_model(self) -> str:
+        """The model's digest; fails if Ollama or the model is missing."""
         try:
             tags = json.loads(self._request("/api/tags", None))
         except LLMError as error:
             raise LLMError(f"Ollama is not reachable at {self.host}: {error}") from error
-        names = {m["name"] for m in tags.get("models", [])}
-        if self.model not in names and f"{self.model}:latest" not in names:
-            raise LLMError(f"model {self.model!r} not found; run `ollama pull {self.model}`")
+        for model in tags.get("models", []):
+            if model["name"] in (self.model, f"{self.model}:latest"):
+                return model.get("digest", "")
+        raise LLMError(f"model {self.model!r} not found; run `ollama pull {self.model}`")
 
     def _chat(
         self, messages: list[dict], schema: dict | None = None, max_tokens: int = 1024

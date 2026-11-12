@@ -34,6 +34,15 @@ class Result:
     fonts: FontLibrary | None = None
     placements: list[Placement] = field(default_factory=list)
     seconds: dict[str, float] = field(default_factory=dict)
+    # Pages left in the original language because a stage failed on them
+    # (page index -> reason), and the warnings logged during the run.
+    failures: dict[int, str] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+
+    def fail(self, index: int, stage: str, error: Exception) -> None:
+        self.failures[index] = f"{stage}: {type(error).__name__}: {error}"
+        log.error("Page %d left untranslated (%s)", index + 1, self.failures[index])
+        log.debug("Traceback", exc_info=error)
 
     @contextmanager
     def timed(self, stage: str):
@@ -42,8 +51,23 @@ class Result:
         self.seconds[stage] = self.seconds.get(stage, 0.0) + time.perf_counter() - start
 
 
+class DocumentError(Exception):
+    """A document this tool cannot translate."""
+
+
 def translate_pdf(source: Path, destination: Path, translator: Translator) -> Result:
-    doc = pymupdf.open(source)
+    try:
+        doc = pymupdf.open(source)
+    except (pymupdf.FileDataError, RuntimeError) as error:
+        raise DocumentError(f"not a readable PDF ({error})") from error
+    if not doc.is_pdf:
+        raise DocumentError("not a PDF")
+    if doc.needs_pass:
+        raise DocumentError("the PDF is password-protected")
+    if not any(page.get_text("text").strip() for page in doc):
+        # Scanned pages are images of text: there is nothing to translate
+        # until OCR adds a text layer (e.g. `ocrmypdf`).
+        raise DocumentError("the PDF has no text layer (scanned?); run OCR on it first")
     result = translate_document(doc, translator)
     with result.timed("save"):
         save(doc, destination)
@@ -51,11 +75,26 @@ def translate_pdf(source: Path, destination: Path, translator: Translator) -> Re
 
 
 def translate_document(doc: pymupdf.Document, translator: Translator) -> Result:
-    """Translate `doc` in place."""
-    result = Result()
+    """Translate `doc` in place.
 
+    A page on which reading or drawing fails is left as it was and recorded
+    in `Result.failures`; the other pages are still translated. Translation
+    errors stop the run: they concern the whole document (the engine is down).
+    """
+    result = Result()
+    with _collect_warnings(result.warnings):
+        _translate_document(doc, translator, result)
+    return result
+
+
+def _translate_document(doc: pymupdf.Document, translator: Translator, result: Result) -> None:
     with result.timed("extract"):
-        result.pages = [extract_paragraphs(page) for page in doc]
+        for index, page in enumerate(doc):
+            try:
+                result.pages.append(extract_paragraphs(page))
+            except Exception as error:
+                result.fail(index, "reading", error)
+                result.pages.append([])
     paragraphs = [p for page_paragraphs in result.pages for p in page_paragraphs]
     log.info("%d pages, %d paragraphs", len(doc), len(paragraphs))
 
@@ -83,10 +122,42 @@ def translate_document(doc: pymupdf.Document, translator: Translator) -> Result:
         )
 
     with result.timed("render"):
-        for page, page_paragraphs in zip(doc, result.pages):
+        # Drawing removes the original text first; a page that fails halfway
+        # is restored from this copy.
+        original = pymupdf.open("pdf", doc.tobytes())
+        failed = []
+        for index, (page, page_paragraphs) in enumerate(zip(doc, result.pages)):
             translated = [by_paragraph[id(p)] for p in page_paragraphs]
-            result.placements += render_page(page, translated, result.fonts)
-    return result
+            try:
+                result.placements += render_page(page, translated, result.fonts)
+            except Exception as error:
+                result.fail(index, "drawing", error)
+                failed.append(index)
+        for index in failed:
+            doc.delete_page(index)
+            doc.insert_pdf(original, from_page=index, to_page=index, start_at=index)
+
+
+class _WarningCollector(logging.Handler):
+    def __init__(self, messages: list[str]) -> None:
+        super().__init__(logging.WARNING)
+        self.messages = messages
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.levelno == logging.WARNING:  # errors are in Result.failures
+            self.messages.append(record.getMessage())
+
+
+@contextmanager
+def _collect_warnings(messages: list[str]):
+    """Copy the warnings logged by this package into `messages`."""
+    logger = logging.getLogger("doc_translator")
+    handler = _WarningCollector(messages)
+    logger.addHandler(handler)
+    try:
+        yield
+    finally:
+        logger.removeHandler(handler)
 
 
 def save(doc: pymupdf.Document, destination: Path) -> None:
