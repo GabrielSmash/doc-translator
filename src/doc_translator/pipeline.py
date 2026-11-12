@@ -1,4 +1,4 @@
-"""End-to-end flow: extract -> translate -> realign styles -> render."""
+"""End-to-end flow: read and analyze -> translate -> realign styles -> render."""
 
 import logging
 import time
@@ -10,9 +10,8 @@ from pathlib import Path
 import pymupdf
 
 from .align import base_style, paragraph_runs, realign, styled_segments
-from .extract import extract_paragraphs
+from .analysis import Action, Block, analyze_page
 from .fonts import FontLibrary
-from .models import Paragraph
 from .render import Placement, TranslatedParagraph, render_page
 from .translators import Translator, Unit, UnitTranslation
 
@@ -27,7 +26,7 @@ class Result:
     re-implementing the stages, so it measures exactly what the CLI runs.
     """
 
-    pages: list[list[Paragraph]] = field(default_factory=list)
+    pages: list[list[Block]] = field(default_factory=list)  # every block, kept ones too
     units: list[Unit] = field(default_factory=list)
     translations: list[UnitTranslation] = field(default_factory=list)
     translated: list[TranslatedParagraph] = field(default_factory=list)
@@ -88,15 +87,16 @@ def translate_document(doc: pymupdf.Document, translator: Translator) -> Result:
 
 
 def _translate_document(doc: pymupdf.Document, translator: Translator, result: Result) -> None:
-    with result.timed("extract"):
+    with result.timed("analyze"):
         for index, page in enumerate(doc):
             try:
-                result.pages.append(extract_paragraphs(page))
+                result.pages.append(analyze_page(page))
             except Exception as error:
                 result.fail(index, "reading", error)
                 result.pages.append([])
-    paragraphs = [p for page_paragraphs in result.pages for p in page_paragraphs]
-    log.info("%d pages, %d paragraphs", len(doc), len(paragraphs))
+    paragraphs = [b for page_blocks in result.pages for b in page_blocks if b.action == Action.TRANSLATE]
+    kept = sum(len(page_blocks) for page_blocks in result.pages) - len(paragraphs)
+    log.info("%d pages, %d paragraphs to translate, %d blocks kept", len(doc), len(paragraphs), kept)
 
     prepared = []
     for paragraph in paragraphs:
@@ -126,10 +126,11 @@ def _translate_document(doc: pymupdf.Document, translator: Translator, result: R
         # is restored from this copy.
         original = pymupdf.open("pdf", doc.tobytes())
         failed = []
-        for index, (page, page_paragraphs) in enumerate(zip(doc, result.pages)):
-            translated = [by_paragraph[id(p)] for p in page_paragraphs]
+        for index, (page, page_blocks) in enumerate(zip(doc, result.pages)):
+            translated = [by_paragraph[id(b)] for b in page_blocks if b.action == Action.TRANSLATE]
+            kept_areas = [b.bbox for b in page_blocks if b.action == Action.KEEP]
             try:
-                result.placements += render_page(page, translated, result.fonts)
+                result.placements += render_page(page, translated, result.fonts, kept_areas)
             except Exception as error:
                 result.fail(index, "drawing", error)
                 failed.append(index)
@@ -168,7 +169,7 @@ def save(doc: pymupdf.Document, destination: Path) -> None:
     doc.save(destination, garbage=4, deflate=True)
 
 
-def _font_flags(paragraphs: list[Paragraph]) -> dict[str, int]:
+def _font_flags(paragraphs: list[Block]) -> dict[str, int]:
     """The PDF flags of each font, as set on most of its text."""
     weights: dict[str, Counter[int]] = defaultdict(Counter)
     for paragraph in paragraphs:

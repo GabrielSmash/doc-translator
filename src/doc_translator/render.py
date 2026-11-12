@@ -9,7 +9,7 @@ import pymupdf
 
 from .align import Run
 from .fonts import FontLibrary, generic_family
-from .models import Leader, Paragraph
+from .analysis.model import Block, Leader
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ BASE14 = {
 
 @dataclass
 class TranslatedParagraph:
-    source: Paragraph
+    source: Block
     runs: list[Run]
 
 
@@ -43,9 +43,14 @@ class Placement:
 
 
 def render_page(
-    page: pymupdf.Page, paragraphs: list[TranslatedParagraph], fonts: FontLibrary
+    page: pymupdf.Page,
+    paragraphs: list[TranslatedParagraph],
+    fonts: FontLibrary,
+    kept: list[pymupdf.Rect] = (),
 ) -> list[Placement]:
-    obstacles = _obstacles(page, paragraphs)
+    """`kept`: areas of text left as it is (code, markers, rotated text),
+    which translations must not grow into."""
+    obstacles = _obstacles(page, paragraphs) + list(kept)
     _remove_original_text(page, paragraphs)
     return [_insert(page, paragraph, obstacles, fonts) for paragraph in paragraphs]
 
@@ -200,7 +205,7 @@ def _text_width(text: str, leader: Leader) -> float:
 
 
 def _available_rect(
-    page: pymupdf.Page, paragraph: Paragraph, obstacles: list[pymupdf.Rect]
+    page: pymupdf.Page, paragraph: Block, obstacles: list[pymupdf.Rect]
 ) -> pymupdf.Rect:
     """Grow the paragraph box into the empty space around it.
 
@@ -298,7 +303,7 @@ def _small_caps_html(text: str, small_size: float) -> str:
     return "".join(parts)
 
 
-def _line_height(paragraph: Paragraph) -> str:
+def _line_height(paragraph: Block) -> str:
     """Reproduce the original baseline-to-baseline distance."""
     lines = paragraph.lines
     size = lines[0].spans[0].size

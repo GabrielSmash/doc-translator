@@ -11,7 +11,7 @@ from collections import Counter
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
-from .models import Paragraph
+from .analysis.model import Block
 
 MIN_SIMILARITY = 0.6
 WORD = re.compile(r"\S+")
@@ -37,7 +37,7 @@ class Run:
     style: Style
 
 
-def paragraph_runs(paragraph: Paragraph) -> list[Run]:
+def paragraph_runs(paragraph: Block) -> list[Run]:
     """Merge consecutive spans with the same style; lines join with a space."""
     runs: list[Run] = []
     for index, line in enumerate(paragraph.lines):

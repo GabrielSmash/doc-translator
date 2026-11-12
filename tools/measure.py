@@ -29,7 +29,8 @@ import numpy as np
 import pymupdf
 
 from doc_translator.align import base_style, paragraph_runs
-from doc_translator.extract import TEXT_FLAGS
+from doc_translator.analysis import Action
+from doc_translator.pdf.read import TEXT_FLAGS
 from doc_translator.pipeline import save, translate_document
 from doc_translator.translators import Unit, UnitTranslation
 
@@ -58,6 +59,7 @@ LOWER_IS_BETTER = {
     "uri_links_lost",
     "internal_links_lost",
     "rotated_lines_lost",
+    "kept_lines_lost",
     "blank_chars",
     "overlaps_added",
     "size_ratio",
@@ -143,12 +145,13 @@ def measure(path: Path, engine, engine_name: str, pages: tuple[int, int] | None 
             **_integrity(original, output, len(original.tobytes()), output_bytes),
             **_layout(original, output),
             **_searchable(output, result),
+            **_kept(output, result),
         }
     if engine_name not in ("identity",):
         metrics |= _translation(result)
     return {
         "pages": len(original),
-        "paragraphs": sum(len(p) for p in result.pages),
+        "paragraphs": len(result.translated),
         "metrics": {k: round(v, 3) if isinstance(v, float) else v for k, v in metrics.items()},
         "seconds": {k: round(v, 2) for k, v in result.seconds.items()},
     }
@@ -161,7 +164,12 @@ def _nonspace(text: str) -> int:
 def _coverage(original: pymupdf.Document, result) -> dict:
     total = sum(_nonspace(page.get_text(flags=TEXT_FLAGS)) for page in original)
     translated = sum(_nonspace(u.text) for u in result.units)
-    return {"translated_pct": 100 * translated / max(total, 1)}
+    # Left untouched on purpose (code, markers, rotated text): not a loss.
+    kept = sum(_nonspace(b.text) for page in result.pages for b in page if b.action == Action.KEEP)
+    return {
+        "translated_pct": 100 * translated / max(total, 1),
+        "kept_pct": 100 * kept / max(total, 1),
+    }
 
 
 def _fit(result) -> dict:
@@ -316,12 +324,31 @@ def _searchable(output, result) -> dict:
     found = checked = 0
     for page, paragraphs in zip(output, result.pages):
         text = normalize(page.get_text(flags=TEXT_FLAGS))
-        for paragraph in paragraphs:
+        for paragraph in (p for p in paragraphs if p.action == Action.TRANSLATE):
             translated = normalize("".join(r.text for r in by_paragraph[id(paragraph)].runs))[:25]
             if len(translated) >= 8:
                 checked += 1
                 found += translated in text
     return {"searchable_pct": 100 * found / checked if checked else 100.0}
+
+
+def _kept(output, result) -> dict:
+    """Lines analysis decided to keep (code, markers, rotated text) that are
+    missing from the output: drawing must never remove them."""
+
+    def compact(text: str) -> str:
+        return re.sub(r"\s+", "", text)
+
+    lost = 0
+    for page, blocks in zip(output, result.pages):
+        text = compact(page.get_text(flags=TEXT_FLAGS))
+        lost += sum(
+            compact(line.text) not in text
+            for block in blocks
+            if block.action == Action.KEEP
+            for line in block.lines
+        )
+    return {"kept_lines_lost": lost}
 
 
 def _translation(result) -> dict:
@@ -367,6 +394,7 @@ def load_baseline() -> dict:
 
 SUMMARY = [
     ("translated_pct", "transl%"),
+    ("kept_pct", "kept%"),
     ("full_size_pct", "full%"),
     ("scaled_below_90_pct", "<90%"),
     ("styles_carried_pct", "styles%"),

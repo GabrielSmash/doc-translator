@@ -9,16 +9,19 @@ from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .analysis import Action
 from .fonts import SUBSET_PREFIX
 
 FULL_SIZE = 0.999  # scales above this count as the original size
 MAX_LISTED = 8  # pages or fonts named in the summary before "..."
+KEPT_NAMES = {"marker": "list markers", "code": "code blocks", "rotated": "rotated lines"}
 
 
 @dataclass
 class PageReport:
     page: int  # 1-based, as people count pages
-    paragraphs: int
+    paragraphs: int  # blocks translated
+    kept: dict[str, int]  # blocks left as they are, by kind (code, marker...)
     reduced: int  # paragraphs drawn smaller than the original font size
     not_fitted: int  # paragraphs that overflowed their box even reduced
     error: str | None = None  # the page was left untranslated
@@ -47,12 +50,13 @@ class Report:
         pages = [
             PageReport(
                 page=index + 1,
-                paragraphs=len(paragraphs),
+                paragraphs=sum(b.action == Action.TRANSLATE for b in blocks),
+                kept=dict(Counter(str(b.kind) for b in blocks if b.action != Action.TRANSLATE)),
                 reduced=by_page.get(index, Counter())["reduced"],
                 not_fitted=by_page.get(index, Counter())["not_fitted"],
                 error=result.failures.get(index),
             )
-            for index, paragraphs in enumerate(result.pages)
+            for index, blocks in enumerate(result.pages)
         ]
 
         chars = translated = 0
@@ -88,6 +92,12 @@ class Report:
             f"{len(self.pages)} pages, {paragraphs} paragraphs, "
             f"{share:.0f}% of the text translated, in {seconds:.0f} s"
         ]
+        kept: Counter[str] = Counter()
+        for page in self.pages:
+            kept.update(page.kept)
+        if kept:
+            kinds = ", ".join(f"{count} {KEPT_NAMES.get(kind, kind)}" for kind, count in kept.most_common())
+            lines.append(f"  Left as they are: {kinds}")
         reduced = [p for p in self.pages if p.reduced]
         if reduced:
             count = sum(p.reduced for p in reduced)

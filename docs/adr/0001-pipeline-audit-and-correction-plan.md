@@ -157,3 +157,19 @@ Found while fixing:
   measured).
 - The uncommitted terminology work (`terms.py`, glossary enforcement) is
   independent of this plan.
+
+### Phase 3 results
+
+| Defect | Status | Measured |
+|---|---|---|
+| 6: rotated text | Fixed, moved from phase 4 | Rotated lines lost: NIST 8, arXiv 1, manual 2, all to 0. Once analysis classifies every line, a line that is not horizontal is a block with action `keep`, never removed nor redrawn |
+| 1: insertion box too short | NIST fixed | NIST identity run: 92.6% to 98.8% of paragraphs at full size, overlaps added 22 to 0. Its rotated margin labels had been paragraphs, and their boxes shrank the paragraphs beside them. arXiv and IRS remain for phase 4 |
+
+Found while fixing:
+
+- Kept blocks are obstacles for the translations around them. On arXiv the
+  author emails (monospaced, kept) stopped "Google Brain" from growing over
+  them: overlaps added 9 to 5, but those lines now hit defect 1, and the
+  share of full-size paragraphs dropped from 83.8% to 78.3%. Phase 4
+  recovers it.
+

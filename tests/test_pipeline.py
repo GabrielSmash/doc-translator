@@ -80,10 +80,10 @@ def test_progress_store_is_given_to_engines_that_resume(tmp_path):
 def test_page_failing_to_draw_is_kept_and_reported(monkeypatch):
     original_render = pipeline.render_page
 
-    def render(page, paragraphs, fonts):
+    def render(page, paragraphs, fonts, kept):
         if page.number == 1:
             raise ValueError("broken page")
-        return original_render(page, paragraphs, fonts)
+        return original_render(page, paragraphs, fonts, kept)
 
     monkeypatch.setattr(pipeline, "render_page", render)
     doc = three_pages()
@@ -97,14 +97,14 @@ def test_page_failing_to_draw_is_kept_and_reported(monkeypatch):
 
 
 def test_page_failing_to_read_is_kept_and_reported(monkeypatch):
-    original_extract = pipeline.extract_paragraphs
+    original_analyze = pipeline.analyze_page
 
-    def extract(page):
+    def analyze(page):
         if page.number == 0:
             raise ValueError("unreadable")
-        return original_extract(page)
+        return original_analyze(page)
 
-    monkeypatch.setattr(pipeline, "extract_paragraphs", extract)
+    monkeypatch.setattr(pipeline, "analyze_page", analyze)
     doc = three_pages()
     result = translate_document(doc, Pseudo())
 
@@ -129,7 +129,7 @@ def test_unusable_documents_are_refused(tmp_path):
 
 
 def test_report_counts_pages_failures_and_fonts(monkeypatch, tmp_path):
-    def render(page, paragraphs, fonts):
+    def render(page, paragraphs, fonts, kept):
         raise ValueError("broken page")
 
     monkeypatch.setattr(pipeline, "render_page", render)

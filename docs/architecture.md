@@ -222,8 +222,8 @@ Each phase leaves the tool working and has a number to move.
 | 0 ✅ | Harness, fixtures and corpus in the repository; CI | The audit numbers are reproduced by one command |
 | 1 ✅ | Defects 3 and 2 (content corruption), 7 and 9 (small); 4 moved here | No blank characters on the NIST report; tables on manual pages 17 and 29 intact |
 | 2 ✅ | Report and CLI summary; per-page isolation; translation cache | A run states what it changed; a layout experiment does not re-translate |
-| 3 | Model with kinds and actions; `extract.py` split | Every line of every corpus page belongs to one block |
-| 4 | `layout.py` separated from drawing; defects 1, 5, 6, 10 | Identity run keeps full size in at least 98% of paragraphs |
+| 3 ✅ | Model with kinds and actions; `extract.py` split | Every line of every corpus page belongs to one block |
+| 4 | `layout.py` separated from drawing; defects 1, 5, 10 (6 done in phase 3) | Identity run keeps full size in at least 98% of paragraphs |
 | 5 | Defect 8; `LanguagePair`; PyPI | Styles carried over on the LLM engine match the fast engine |
 
 Phase 0 comes first because every later phase is judged by it. Phase 1 comes
@@ -245,6 +245,27 @@ harness needs every stage's output) and the CLI builds the `Report` from it.
 The cache lives in `translators/` until phase 3 moves the package. A
 translation error still stops the run, since it concerns the whole document,
 but with the cache the next run resumes instead of starting over.
+
+### Phase 3 results
+
+`extract.py` and `models.py` became `pdf/read.py` (stage 1, `PageContent`)
+and the `analysis` package (stage 2): `model.py`, `lines.py`, `graphics.py`,
+`blocks.py`, `classify.py`. `Paragraph` is now `Block`, with a `kind` and an
+`action`.
+
+| Change | Measured |
+|---|---|
+| Code, list markers standing apart and rotated text become blocks with action `keep`, instead of being dropped (or, for rotated text, redrawn horizontally) | Manual: 88 markers, 12 code blocks, 2 rotated lines kept; the summary lists them |
+| Kept blocks are obstacles for the translations next to them | Overlaps added: NIST 22 to 0, arXiv 9 to 5, manual 13 to 11 |
+| Every line of a page belongs to exactly one block | Test on every page of the corpus and fixtures; also holds on all 29 pages of the manual |
+| Kinds of translated blocks: heading, list item, table cell, TOC entry, caption, paragraph | Descriptive for now; layout can use them in phase 4. Table cells need three blocks side by side, so two-column tables are labeled paragraphs |
+| New metrics `kept_pct` and `kept_lines_lost` (drawing must never remove kept text) | `kept_lines_lost` is 0 on every document |
+| One definition of "monospaced" (`fonts.MONO_NAMES`) | S7, in part |
+
+`translated_pct` now counts only text sent to translation, so it dropped
+where text is kept on purpose (rotated text fixture 100% to 81%); `kept_pct`
+shows the rest. `render.py`, `fonts.py` and `translators/` keep their place
+until phase 4 splits layout from drawing.
 
 ## 6. Open decisions
 

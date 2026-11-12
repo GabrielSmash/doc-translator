@@ -87,8 +87,10 @@ uv sync --extra gpu    # installs the CUDA libraries CTranslate2 needs
 ## How it works
 
 ```text
-extract  → paragraphs with per-run styles, links, underlines, small caps,
-           table cells, TOC entries (PyMuPDF); code and symbols left untouched
+read     → text lines, drawings and links of each page (PyMuPDF)
+analyze  → every line goes into one block with a kind (paragraph, heading,
+           list item, table cell, TOC entry, caption, code, marker, rotated)
+           and an action: translate, or keep as it is (code, markers, rotated)
 translate→ fast: sentence by sentence; llm: glossary + batches in reading order
 align    → bold/italic/links are mapped onto the translated text
 render   → original text removed, translation written in the same area,

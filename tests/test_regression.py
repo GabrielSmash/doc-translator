@@ -86,10 +86,10 @@ def test_table_rows_stay_separate(fixture_paths):
     """With its rules kept, each row of a bordered table is its own paragraph."""
     import pymupdf
 
-    from doc_translator.extract import extract_paragraphs
+    from doc_translator.analysis import analyze_page
 
     page = pymupdf.open(fixture_paths["bordered_table"])[0]
-    texts = [p.text for p in extract_paragraphs(page)]
+    texts = [p.text for p in analyze_page(page)]
     for label in ("Hostname", "IP Address", "Netmask", "Gateway", "Broadcast"):
         assert label in texts
 
@@ -120,14 +120,22 @@ def test_internal_links_are_kept(fixture_paths):
     assert measured("internal_links", "identity", fixture_paths)["internal_links_lost"] == 0
 
 
-@defect(6, "rotated text is cut and rewritten horizontally")
 def test_rotated_text_is_kept(fixture_paths):
+    """Defect 6, fixed: rotated lines are kept as they are (action keep)."""
     assert measured("rotated_text", "identity", fixture_paths)["rotated_lines_lost"] == 0
 
 
 @pytest.mark.corpus
-@defect(1, "insertion box too short: untranslated text shrinks")
-@pytest.mark.parametrize("name", [d.name for d in corpus.CORPUS])
+@pytest.mark.parametrize(
+    "name",
+    [
+        # NIST reached 98% once its rotated labels were kept as they are and
+        # stopped acting as paragraphs that shrink their neighbors (phase 3).
+        "nist",
+        pytest.param("arxiv", marks=defect(1, "insertion box too short: untranslated text shrinks")),
+        pytest.param("irs-w4", marks=defect(1, "insertion box too short: untranslated text shrinks")),
+    ],
+)
 def test_untranslated_text_keeps_its_size(name):
     assert measured(name, "identity")["full_size_pct"] >= 98
 
