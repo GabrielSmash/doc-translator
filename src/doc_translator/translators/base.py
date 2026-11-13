@@ -34,6 +34,8 @@ class Unit:
     # Phrases set in italics: names of screens, menus and fields are, in
     # manuals ("the Network Setup menu"); see terms.interface_labels.
     labels: list[str] = field(default_factory=list)
+    # The whole table a cell belongs to, one row per line (context).
+    table: str = ""
 
 
 @dataclass

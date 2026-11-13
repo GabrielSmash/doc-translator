@@ -18,6 +18,8 @@ class FakeLLM(LLMTranslator):
         self._all_layers_on_gpu = False
         self._brief = ""
         self._sections = {}
+        self._tables = {}
+        self._table_cells = {}
         self.answers = iter(answers)
         self.prompts: list[list[dict]] = []
         self.brief = None  # None: skip the description call
@@ -259,3 +261,42 @@ def test_untranslated_text_is_detected_but_names_are_not():
     assert not _untranslated(
         "Changed “route” to “gateway” throughout manual", "Alterado 'route' para 'gateway' em todo o manual"
     )
+
+
+def test_cells_are_translated_together_with_their_table():
+    """A cell alone ("Pin #", "White/Orange") says too little: the cells of
+    a table go in one batch, with the whole table as context, apart from
+    the running text around it."""
+    table = "Pin # | Signal | Color\n1 | Transmit + | White/Orange"
+    llm = FakeLLM(
+        [
+            json.dumps({"translations": ["Conecte o cabo."]}),
+            json.dumps({"translations": ["Pino #", "Sinal", "Cor", "Transmitir +", "Branco/Laranja"]}),
+            json.dumps({"translations": ["Veja a tabela."]}),
+        ]
+    )
+    cells = [Unit(text, table=table) for text in ["Pin #", "Signal", "Color", "Transmit +", "White/Orange"]]
+    result = llm.translate_units([Unit("Connect the cable."), *cells, Unit("See the table.")])
+    assert [r.text for r in result][1] == "Pino #"
+    batch = llm.prompts[1][1]["content"]
+    assert "cells of this table" in batch and table in batch
+    assert "Preceding text" not in batch
+    assert "Connect the cable." not in batch.split("cells of this table")[1]
+
+
+def test_batches_keep_groups_apart():
+    group = {"a": "t1", "b": "t1", "c": "", "d": "t2"}
+    assert _batches(["a", "b", "c", "d"], group.get) == [["a", "b"], ["c"], ["d"]]
+
+
+def test_a_table_goes_in_one_batch_and_later_batches_follow_earlier_ones():
+    cells = [f"cell {n}" for n in range(15)]
+    assert len(_batches(cells, lambda text: "table")) == 1  # not 10 + 5
+
+    table = "Color\nWhite\nGreen"
+    llm = FakeLLM([json.dumps({"translations": ["Verde"]})])
+    llm._tables = {"White": table, "Green": table}
+    llm._table_cells = {table: ["White", "Green"]}
+    llm._cache = {"White": "Branco"}
+    llm._translate_all(["White", "Green"], Glossary(), with_context=True)
+    assert "White => Branco" in llm.prompts[0][1]["content"]

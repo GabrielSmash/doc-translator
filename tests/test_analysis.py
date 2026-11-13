@@ -174,3 +174,15 @@ def test_a_dot_leader_drawn_dot_by_dot_follows_its_words():
     assert len(blocks) == 1
     assert blocks[0].text == "Otherwise, (b) is more accurate"
     assert blocks[0].leader is not None and blocks[0].leader.number == ""
+
+
+def test_cells_are_grouped_into_tables_as_text():
+    from doc_translator.analysis.tables import table_text, tables
+
+    rows = [("Pin", "Name", "Function"), ("1", "Tx", "Transmit data"), ("2", "Rx", "Receive data")]
+    items = [(text, (72 + 130 * column, 300 + 24 * row), {}) for row, cells in enumerate(rows) for column, text in enumerate(cells)]
+    items.append(("A paragraph far below the table, about something else.", (72, 600), {}))
+    blocks = analyze_page(page_with(*items))
+    found = tables(blocks)
+    assert len(found) == 1
+    assert table_text(found[0]) == "Pin | Name | Function\n1 | Tx | Transmit data\n2 | Rx | Receive data"

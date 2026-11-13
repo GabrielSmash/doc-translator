@@ -20,6 +20,9 @@ Checks, and the stage they watch:
 - headings_in_cells (analysis): table cells taken for section headings.
 - mixed_sizes (layout): text of one style on a page written in different
   sizes, other than a paragraph shrunk alone to fit (below 85%).
+- inconsistent_words (translation): a word of short texts (cells, labels)
+  kept in English in some translations and translated in others ("White"
+  in "White/Orange" kept, in "White/Green" translated).
 - changed_form (translation): a short text (a cell, a label) whose
   translation lost a sign standing apart ("Transmit –"), gained a final
   period, or changed the case of its first letter ("no" -> "Não.").
@@ -48,6 +51,7 @@ CHECKS = (
     "headings_in_cells",
     "changed_form",
     "mixed_sizes",
+    "inconsistent_words",
 )
 # Gaps between words of one line reach this many font sizes in justified text.
 WORD_GAP = 1.5
@@ -87,6 +91,7 @@ def find(original: pymupdf.Document, output: pymupdf.Document, result) -> list[F
         ]
     findings += _misplaced_leaders(output, result)
     findings += _changed_form(result)
+    findings += _inconsistent_words(result)
     return findings
 
 
@@ -310,6 +315,36 @@ def _misplaced_leaders(output, result) -> list[Finding]:
             if numbers != [leader.number]:
                 found.append(Finding("misplaced_leaders", index + 1, block.text, f"found {numbers}"))
     return found
+
+
+# Short texts: cells and labels, where a word has no sentence around it.
+SHORT_TEXT_WORDS = 6
+
+
+def _inconsistent_words(result) -> list[Finding]:
+    """Words of short texts the engine kept in some and translated in others.
+
+    Measured without aligning words: a word kept appears as it is in the
+    translation. A word kept everywhere (a name, a word spelled the same in
+    both languages) or translated everywhere is consistent.
+    """
+    import re
+
+    word = re.compile(r"[A-Za-z]{3,}")
+    kept: dict[str, list[str]] = {}
+    changed: dict[str, list[str]] = {}
+    for unit, translation in zip(result.units, result.translations):
+        source, text = unit.text.strip(), translation.text
+        if len(source.split()) > SHORT_TEXT_WORDS or source == text.strip():
+            continue
+        translated_words = {w.lower() for w in word.findall(text)}
+        # Keys and placeholders ("<Enter>") are typed, not translated.
+        for w in {w.lower() for w in word.findall(re.sub(r"<[^>]*>", " ", source))}:
+            (kept if w in translated_words else changed).setdefault(w, []).append(source)
+    return [
+        Finding("inconsistent_words", 0, w, f"kept in {kept[w][0]!r}, translated in {changed[w][0]!r}")
+        for w in sorted(kept.keys() & changed.keys())
+    ]
 
 
 def _changed_form(result) -> list[Finding]:

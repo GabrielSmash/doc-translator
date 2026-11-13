@@ -37,6 +37,10 @@ EXAMPLE_CHARS = 160  # usage example shown with each glossary term
 # against the cost of a bad answer, which sends the whole batch to retry.
 BATCH_CHARS = 1500
 BATCH_UNITS = 10
+# Cells are short, and a table split into batches was translated batch by
+# batch: colors in English in one, in Portuguese in the next. A table goes
+# in one batch up to this many cells (and BATCH_CHARS).
+TABLE_BATCH_UNITS = 60
 # A translation this much longer/shorter than the source is probably not a
 # translation (an explanation, a refusal, a truncated answer).
 MAX_LENGTH_RATIO = 2.5
@@ -115,6 +119,8 @@ class LLMTranslator:
         self._progress = None
         self._brief = ""
         self._sections: dict[str, str] = {}
+        self._tables: dict[str, str] = {}
+        self._table_cells: dict[str, list[str]] = {}
         digest = self._check_model()
         # The digest changes when `ollama pull` brings a new version.
         self.cache_id = f"llm|{model}|{digest}|{languages.target_code}|{glossary_id(glossary)}"
@@ -136,6 +142,9 @@ class LLMTranslator:
         self._brief = self._describe(units)
         for unit in units:
             self._sections.setdefault(unit.text, unit.section)
+            if unit.table:
+                self._tables.setdefault(unit.text, unit.table)
+                self._table_cells.setdefault(unit.table, []).append(unit.text)
         paragraphs = [u.text for u in units]
         self._translate_all(paragraphs, glossary, with_context=True)
         # Styled phrases on their own, after the paragraphs, as the fast
@@ -165,7 +174,8 @@ class LLMTranslator:
                 log.info("Resuming: %d texts translated by an earlier run", len(resumed))
         done = sum(text in self._cache for text in pending)
         pending = [text for text in pending if text not in self._cache]
-        for batch in _batches(pending):
+        # The cells of one table go together, with the table as context.
+        for batch in _batches(pending, lambda text: self._tables.get(text, "")):
             start = first_seen[batch[0]]
             context = texts[max(0, start - CONTEXT_UNITS) : start] if with_context else []
             translated = dict(zip(batch, self._translate_batch(batch, context, glossary)))
@@ -294,7 +304,23 @@ class LLMTranslator:
         section = self._sections.get(texts[0], "") if texts else ""
         if section and section not in texts:
             parts.append(f"Section: {section}")
-        if context:
+        if table := self._tables.get(texts[0], "") if texts else "":
+            # The whole table says more than the cells before these ones.
+            parts.append(
+                "The items are cells of this table (context only, do not translate it). "
+                "Translate headers and values like any other text, keeping only names, "
+                "codes and abbreviations; and translate each cell consistently with the "
+                "rest of the table: the same word the same way in every cell.\n" + table
+            )
+            # A table too long for one batch: what earlier batches decided.
+            done = [
+                f"{cell} => {self._cache[cell]}"
+                for cell in dict.fromkeys(self._table_cells.get(table, []))
+                if cell in self._cache and cell not in texts
+            ]
+            if done:
+                parts.append("Cells of this table already translated (follow them):\n" + "\n".join(done))
+        elif context:
             parts.append("Preceding text (context only, do not translate):\n" + "\n".join(context))
         parts.append(task)
         return [
@@ -373,11 +399,16 @@ class LLMError(RuntimeError):
     pass
 
 
-def _batches(texts: list[str]) -> list[list[str]]:
+def _batches(texts: list[str], group=lambda text: "") -> list[list[str]]:
+    """Consecutive texts in batches; a batch holds texts of one `group`
+    only (the cells of one table, or running text)."""
     batches: list[list[str]] = []
     size = 0
     for text in texts:
-        if not batches or len(batches[-1]) >= BATCH_UNITS or size + len(text) > BATCH_CHARS:
+        if batches:
+            limit = TABLE_BATCH_UNITS if group(batches[-1][0]) else BATCH_UNITS
+            full = len(batches[-1]) >= limit or size + len(text) > BATCH_CHARS
+        if not batches or full or group(text) != group(batches[-1][0]):
             batches.append([])
             size = 0
         batches[-1].append(text)

@@ -420,6 +420,7 @@ SUMMARY = [
     ("headings_in_cells", "cellhead"),
     ("changed_form", "form"),
     ("mixed_sizes", "mixed"),
+    ("inconsistent_words", "inconsist"),
 ]
 
 

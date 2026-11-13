@@ -120,8 +120,9 @@ class CachedTranslator:
         # so an interrupted run resumes where it stopped.
         if hasattr(self.translator, "keep_progress"):
             self.translator.keep_progress(self.cache.namespace("texts|" + name))
-        # Labels decide which words stay untranslated, so they are part of the key.
-        keys = [json.dumps([u.text, u.segments, u.labels], ensure_ascii=False) for u in units]
+        # Labels decide which words stay untranslated, and a cell's table how
+        # it is translated, so they are part of the key.
+        keys = [json.dumps([u.text, u.segments, u.labels, u.table], ensure_ascii=False) for u in units]
         found = self.store.get_many(keys)
         missing = {k: u for k, u in zip(keys, units) if k not in found}
         if found:

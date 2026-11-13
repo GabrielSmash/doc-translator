@@ -11,6 +11,7 @@ import pymupdf
 
 from .align import base_style, paragraph_runs, realign, styled_segments
 from .analysis import Action, Block, Kind, analyze_page
+from .analysis.tables import table_text, tables
 from .fonts import FontLibrary
 from .layout import Placement, TranslatedParagraph, layout_page
 from .pdf.draw import draw_page
@@ -111,11 +112,21 @@ def _translate_document(doc: pymupdf.Document, translator: Translator, result: R
     # can batch, deduplicate and use the surrounding text as context.
     result.units = []
     section = ""
+    # A cell is translated knowing its whole table: header and rows.
+    table_of = {
+        id(cell): text
+        for blocks in result.pages
+        for cells in tables(blocks)
+        if (text := table_text(cells))
+        for cell in cells
+    }
     for paragraph, base, segments in prepared:
         if paragraph.kind == Kind.HEADING:
             section = paragraph.text
         labels = [s.text.strip() for s in segments if s.style.italic and not base.italic]
-        result.units.append(Unit(paragraph.text, [s.text.strip() for s in segments], section, labels))
+        result.units.append(
+            Unit(paragraph.text, [s.text.strip() for s in segments], section, labels, table_of.get(id(paragraph), ""))
+        )
     with result.timed("translate"):
         stripped = [strip_affixes(unit) for unit in result.units]
         translations = translator.translate_units([unit for unit, _, _ in stripped])
