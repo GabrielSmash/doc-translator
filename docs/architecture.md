@@ -226,6 +226,7 @@ Each phase leaves the tool working and has a number to move.
 | 4 ✅ | `layout.py` separated from drawing; defects 1, 5, 10 (6 done in phase 3) | Identity run keeps full size in at least 98% of paragraphs |
 | 5 ✅ | Defect 8; `LanguagePair`; PyPI | Styles carried over on the LLM engine match the fast engine |
 | 6 ✅ | Reading review: layout harmonized, translation context | Pages read as ordered; menus and screens keep their lines |
+| 7 ✅ | Defects by class: inspector, causes C1–C6 | Every class counted on the corpus; the reviewed defects at zero |
 
 Phase 0 comes first because every later phase is judged by it. Phase 1 comes
 before the restructuring because those defects corrupt content today and
@@ -341,6 +342,29 @@ Models compared on manual pages 15 to 17 (GTX 1650 Ti, 4 GB):
 | `translategemma:4b` | 278 s | fluent, but ignores the glossary ("Network Setup" translated, "traps" as "armadilhas") |
 
 The default stays; `qwen3:8b` is documented for better quality.
+
+### Phase 7: defects by class
+
+The review of phase 6 found four defects by eye: text written over a
+paragraph (manual p. 6), table text out of its cells (p. 9, 14), page
+numbers of the table of contents one row too low (p. 2). Instead of fixing
+each, the cause of each was traced, and every class of defect is now
+counted on the whole output by `tools/defects.py`. `measure.py` stores the
+counts in the baseline, so a class cannot come back unnoticed, and each class
+has a fixture (`split_line`, `ruled_table`, `toc_leaders`) for CI.
+
+| Cause | Class (check) | Fix | Manual, fast engine |
+|---|---|---|---|
+| C1. PyMuPDF reads a justified line written word by word as one line per word | `split_lines`, `overlapping_text` | Pieces on one baseline are joined when the gap is a space between words (stretched only inside a justified paragraph) | 12 / 4 → 0 / 0 |
+| C2. Layout did not know the box of rules around a block | `crossed_rules` | The cell (nearest rules on four sides) bounds the translation | 9 → 1 |
+| C3. A one-line block's alignment was always guessed as left | `lost_alignment` | Alignment of its column, or its place in the cell | 17 → 1 |
+| C4. Drawing read the drawn page back to place leaders and links, in a box that reaches the next paragraph | `misplaced_leaders` | Layout records where each line was written; drawing uses that | 32 → 0 |
+| C5. Classification ignored structure: bold cells became headings (and the LLM's section context) | `headings_in_cells` | A block in a cell next to other cells is a table cell | 20 → 0 |
+| C6. Short texts translated as sentences ("no" → "Não.", "Transmit –" → "Transmita...", "N/A" spelled out) | `changed_form`, `grown_cells` | Signs at the ends kept out and put back; final punctuation and first-letter case kept; `N/A` kept by both engines | — → 1 |
+
+The same checks then found, on the IRS form, an item marker "(c)" appended
+to the previous item and lost, and dot leaders drawn one dot at a time that
+the translation ran over (25 overlaps → 0): both fixed the same way.
 
 ## 6. Open decisions
 

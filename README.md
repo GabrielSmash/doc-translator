@@ -148,6 +148,7 @@ uv run pytest                    # unit tests and synthetic fixtures (~2 s)
 uv run pytest --corpus           # also the public corpus (downloads ~3.4 MB once)
 uv run python -m tools.measure   # quality metrics per fixture and engine
 uv run python -m tools.measure --corpus --doc my.pdf --engine identity fast
+uv run python -m tools.defects --doc my.pdf --engine fast   # each defect, where it is
 ```
 
 `tools/measure.py` runs the real pipeline and compares its output with the
@@ -157,6 +158,13 @@ Besides the real engines it has two that need no model: `identity` (original
 text through the whole pipeline, so any difference is a rendering defect)
 and `pseudo` (accented, ~10% longer text, like a translation).
 
+`tools/defects.py` checks rules every translated page must keep and lists
+each case with its page: lines read in pieces, text over other text, text
+out of its table cell, misplaced table-of-contents numbers, lost alignment,
+cells whose translation grew, cells taken for headings, short texts whose
+form changed. A defect noticed by eye is first turned into a check (and a
+fixture), so its whole class is counted and fixed, not the one example.
+
 `tests/baseline.json` stores the current numbers; a test fails when a metric
 gets worse. After an improvement, store the new numbers with
 `uv run python -m tools.measure --fixtures --corpus --update-baseline`.
@@ -164,7 +172,7 @@ Known defects have tests marked `xfail(strict=True)`: when a fix makes one
 pass, remove its marker. See [docs/architecture.md](docs/architecture.md).
 
 Releases: set the version in `pyproject.toml`, then push a tag with the same
-version (`git tag v0.1.0 && git push origin v0.1.0`). The `Publish` workflow
+version (`git tag v0.2.0 && git push origin v0.2.0`). The `Publish` workflow
 runs the tests and uploads the package to PyPI (trusted publishing).
 
 ## License
