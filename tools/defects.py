@@ -262,6 +262,9 @@ def _headings_in_cells(index: int, blocks, rules) -> list[Finding]:
 
 
 def _misplaced_leaders(output, result) -> list[Finding]:
+    """Page numbers must end each entry: on the row of its last line, as
+    written (a long translated title may take one more line)."""
+    by_source = {id(p.paragraph.source): p for p in result.placements}
     found = []
     for index, (page, blocks) in enumerate(zip(output, result.pages)):
         words = page.get_text("words")
@@ -269,7 +272,8 @@ def _misplaced_leaders(output, result) -> list[Finding]:
             leader = block.leader
             if leader is None or not leader.number:
                 continue
-            row = block.lines[-1].bbox
+            placement = by_source.get(id(block))
+            row = placement.lines[-1].rect if placement and placement.lines else block.lines[-1].bbox
             # Words ending where page numbers end, on this entry's row.
             on_row = [
                 w[4]

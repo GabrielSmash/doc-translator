@@ -183,9 +183,10 @@ def test_centered_cells_stay_centered(fixture_paths):
     assert measured("ruled_table", "pseudo", fixture_paths)["lost_alignment"] == 0
 
 
-@defect_class("C4, leaders placed by reading the page back")
 @pytest.mark.parametrize("engine", ENGINES)
 def test_page_numbers_stay_on_their_entry(engine, fixture_paths):
+    """C4, fixed: leaders are drawn where layout measured the title, not
+    where reading the drawn page back finds text."""
     assert measured("toc_leaders", engine, fixture_paths)["misplaced_leaders"] == 0
 
 

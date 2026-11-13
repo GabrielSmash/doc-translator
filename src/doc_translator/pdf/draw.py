@@ -10,7 +10,7 @@ import logging
 import pymupdf
 
 from ..analysis.model import Leader
-from ..layout import Placement, base14, text_width
+from ..layout import Placement, WrittenLine, base14, text_width
 from .read import link_key
 
 log = logging.getLogger(__name__)
@@ -129,25 +129,23 @@ def _finish(page: pymupdf.Page, placement: Placement, targets: dict[str, dict]) 
     elif placement.scale < 1:
         log.debug("Page %d: %r scaled to %.0f%%", page.number + 1, source.text[:30], placement.scale * 100)
 
-    recreated = _recreate_links(page, rect, placement.paragraph.runs, targets)
-    if source.leader:
-        _draw_leader(page, rect, source.leader)
+    # Links are searched only where this paragraph's lines were written: its
+    # box can reach into the next paragraph, which may hold the same words.
+    written = [line.rect for line in placement.lines] or [rect]
+    recreated = _recreate_links(page, written, placement.paragraph.runs, targets)
+    if source.leader and placement.lines:
+        _draw_leader(page, placement.lines[-1], source.leader)
     return recreated
 
 
-def _draw_leader(page: pymupdf.Page, rect: pymupdf.Rect, leader: Leader) -> None:
-    """Fill the gap between the translated title and the page number with dots."""
-    spans = [
-        span
-        for block in page.get_text("dict", clip=rect)["blocks"]
-        for line in block.get("lines", [])
-        for span in line["spans"]
-        if span["text"].strip()
-    ]
-    if not spans:
-        return
-    baseline = max(span["origin"][1] for span in spans)
-    end = max(span["bbox"][2] for span in spans if abs(span["origin"][1] - baseline) < 1)
+def _draw_leader(page: pymupdf.Page, last: WrittenLine, leader: Leader) -> None:
+    """Fill the gap between the translated title and the page number with dots.
+
+    The title's last line is where layout measured it: reading it back from
+    the page found the next entry's text too, inside a box that reaches down
+    to it, and put every number one row too low.
+    """
+    baseline, end = last.baseline, last.rect.x1
 
     fontname = base14(leader)
     color = tuple(((leader.color >> shift) & 0xFF) / 255 for shift in (16, 8, 0))
@@ -164,17 +162,20 @@ def _draw_leader(page: pymupdf.Page, rect: pymupdf.Rect, leader: Leader) -> None
 
 
 def _recreate_links(
-    page: pymupdf.Page, rect: pymupdf.Rect, runs, targets: dict[str, dict]
+    page: pymupdf.Page, lines: list[pymupdf.Rect], runs, targets: dict[str, dict]
 ) -> set[str]:
     recreated = set()
     used: list[pymupdf.Rect] = []
+    area = pymupdf.Rect(lines[0])
+    for line in lines[1:]:
+        area |= line
     for run in runs:
         target = targets.get(run.style.link)
         if target is None or not run.text.strip():
             continue
         # search_for returns one rect per line when the text wraps.
-        for hit in page.search_for(run.text.strip(), clip=rect):
-            if any(hit.intersects(u) for u in used):
+        for hit in page.search_for(run.text.strip(), clip=area):
+            if not any(hit.intersects(line) for line in lines) or any(hit.intersects(u) for u in used):
                 continue
             used.append(hit)
             page.insert_link(_link_at(target, hit))
