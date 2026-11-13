@@ -306,16 +306,20 @@ class Obstacle:
 
 
 def _containers(paragraph: Block, obstacles: list[Obstacle]) -> list[pymupdf.Rect]:
-    """Filled areas the paragraph's text sits on: a table header band, a
-    colored box. The translation must stay inside them, or white text on a
-    dark band lands on the white page and disappears (defect 10).
+    """Areas the paragraph's text must stay inside: its cell (the box of
+    rules around it), and filled areas it sits on, a table header band, a
+    colored box: white text on a dark band that runs onto the white page
+    disappears (defect 10).
 
     Line boxes may stick out of a tight band (they include room for accents),
     so the middle of the lines is what must be inside.
     """
     rect = paragraph.bbox
     ink = pymupdf.Rect(rect.x0 + 1, rect.y0 + rect.height / 4, rect.x1 - 1, rect.y1 - rect.height / 4)
-    return [o.rect for o in obstacles if o.fill and o.rect.contains(ink)]
+    containers = [o.rect for o in obstacles if o.fill and o.rect.contains(ink)]
+    if paragraph.cell is not None:
+        containers.append(paragraph.cell)
+    return containers
 
 
 def _content_area(

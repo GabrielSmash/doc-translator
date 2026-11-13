@@ -141,6 +141,9 @@ class Block:
     leader: Leader | None = None
     kind: Kind = Kind.PARAGRAPH
     action: Action = Action.TRANSLATE
+    # The box of rules around the block (a table cell, a frame): its text
+    # must stay inside. None when it is not boxed in.
+    cell: pymupdf.Rect | None = None
 
     @property
     def bbox(self) -> pymupdf.Rect:

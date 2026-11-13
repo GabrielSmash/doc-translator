@@ -7,6 +7,7 @@ import pymupdf
 
 from ..pdf.read import column_rules
 from .blocks import split_block
+from .cells import align_in_cells, cell_around
 from .classify import classify, kept_block, kept_kind
 from .graphics import separating_rules
 from .lines import join_pieces, visual_lines
@@ -49,5 +50,9 @@ def analyze(content: PageContent) -> list[Block]:
 
     rules = separating_rules([line for _, lines in groups for line in lines], content.drawings)
     blocks = [b for text_block, lines in groups for b in split_block(lines, text_block.bbox, rules)]
+    translated = [b for b in blocks if b.action == Action.TRANSLATE]
+    for block in translated:
+        block.cell = cell_around(block, rules)
+    align_in_cells(translated)
     classify(blocks)
     return blocks + kept

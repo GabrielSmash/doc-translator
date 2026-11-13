@@ -9,6 +9,7 @@ import re
 from collections import Counter
 
 from ..fonts import MONO_NAMES
+from .cells import in_table
 from .model import FLAG_MONOSPACED, Action, Block, Kind, Line
 
 CAPTION = re.compile(r"^(?:Figure|Fig\.|Table)\s+[\dA-Z]+(?:[.\-]\d+)*\s*[.:]", re.IGNORECASE)
@@ -43,7 +44,8 @@ def classify(blocks: list[Block]) -> None:
     """Set the kind of the translated blocks of one page."""
     translated = [b for b in blocks if b.action == Action.TRANSLATE]
     body = _body_size(translated)
-    cells = _table_cells(translated)
+    # Side by side on a baseline, or boxed in by rules next to other boxes.
+    cells = _table_cells(translated) | in_table({id(b): b.cell for b in translated if b.cell is not None})
     for block in translated:
         if block.leader:
             block.kind = Kind.TOC_ENTRY

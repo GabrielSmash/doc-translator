@@ -161,10 +161,6 @@ def test_output_is_not_inflated(name):
 # One fixture reproduces each class; the whole corpus is counted in the baseline.
 
 
-def defect_class(cause: str):
-    return pytest.mark.xfail(reason=f"open: {cause}", strict=True)
-
-
 @pytest.mark.parametrize("engine", ENGINES)
 def test_a_line_written_word_by_word_is_one_line(engine, fixture_paths):
     """C1, fixed: pieces of one line are joined before forming paragraphs."""
@@ -172,14 +168,14 @@ def test_a_line_written_word_by_word_is_one_line(engine, fixture_paths):
     assert metrics["split_lines"] == metrics["overlapping_text"] == 0
 
 
-@defect_class("C2, text leaves its cell")
 def test_table_text_stays_in_its_cell(fixture_paths):
+    """C2, fixed: the box of rules around a block bounds its translation."""
     metrics = measured("ruled_table", "pseudo", fixture_paths)
     assert metrics["crossed_rules"] == 0
 
 
-@defect_class("C3, alignment of one-line cells")
 def test_centered_cells_stay_centered(fixture_paths):
+    """C3, fixed: a one-line cell takes the alignment of its column."""
     assert measured("ruled_table", "pseudo", fixture_paths)["lost_alignment"] == 0
 
 
@@ -190,6 +186,6 @@ def test_page_numbers_stay_on_their_entry(engine, fixture_paths):
     assert measured("toc_leaders", engine, fixture_paths)["misplaced_leaders"] == 0
 
 
-@defect_class("C5, cells taken for headings")
 def test_table_header_cells_are_not_headings(fixture_paths):
+    """C5, fixed: a block boxed in next to other boxes is a table cell."""
     assert measured("bordered_table", "identity", fixture_paths)["headings_in_cells"] == 0
