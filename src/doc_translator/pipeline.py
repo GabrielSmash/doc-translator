@@ -16,6 +16,7 @@ from .layout import Placement, TranslatedParagraph, layout_page
 from .pdf.draw import draw_page
 from .pdf.read import graphic_areas
 from .translators import Translator, Unit, UnitTranslation
+from .translators.form import restore_form, strip_affixes
 
 log = logging.getLogger(__name__)
 
@@ -116,7 +117,12 @@ def _translate_document(doc: pymupdf.Document, translator: Translator, result: R
         labels = [s.text.strip() for s in segments if s.style.italic and not base.italic]
         result.units.append(Unit(paragraph.text, [s.text.strip() for s in segments], section, labels))
     with result.timed("translate"):
-        result.translations = translator.translate_units(result.units)
+        stripped = [strip_affixes(unit) for unit in result.units]
+        translations = translator.translate_units([unit for unit, _, _ in stripped])
+        result.translations = [
+            restore_form(unit.text, translation, lead, trail)
+            for (unit, lead, trail), translation in zip(stripped, translations)
+        ]
 
     with result.timed("realign"):
         for (paragraph, base, segments), translation in zip(prepared, result.translations):

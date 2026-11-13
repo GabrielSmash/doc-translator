@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 
 from ..languages import EN_PT_BR, LanguagePair
-from ..terms import interface_labels, quoted_terms, recurring_terms
+from ..terms import kept_terms, quoted_terms, recurring_terms
 from .base import Glossary, Unit, UnitTranslation
 from .cache import glossary_id
 from .checks import NUMBER, lost_numbers
@@ -126,8 +126,9 @@ class LLMTranslator:
 
     def translate_units(self, units: list[Unit]) -> list[UnitTranslation]:
         glossary = self._build_glossary(units)
-        # Names of screens and fields, set in italics by the document.
-        for label in interface_labels(units):
+        # Names of screens and fields, set in italics by the document, and
+        # abbreviations used as they are ("N/A").
+        for label in kept_terms(units, self.languages):
             glossary.terms.pop(label, None)
             if label not in glossary.keep:
                 glossary.keep.append(label)

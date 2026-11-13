@@ -25,6 +25,10 @@ class LanguagePair:
     source_stopwords: frozenset[str]
     # Target words left lowercase in title case.
     target_minor_words: frozenset[str]
+    # Source abbreviations readers of the target language use as they are,
+    # kept by both engines: a table cell "N/A" spelled out as "NÃO
+    # APLICÁVEL" no longer fits its column.
+    kept_abbreviations: frozenset[str] = frozenset()
 
 
 EN_PT_BR = LanguagePair(
@@ -49,4 +53,5 @@ Boot Loader => KEEP""",
         "a", "o", "as", "os", "e", "de", "da", "do", "das", "dos", "em", "no", "na",
         "nos", "nas", "para", "por", "com", "ao", "aos", "à", "às", "um", "uma",
     }),
+    kept_abbreviations=frozenset({"N/A"}),
 )

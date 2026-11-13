@@ -9,8 +9,15 @@ import ctranslate2
 import sentencepiece as spm
 
 from ..languages import EN_PT_BR, LanguagePair
-from ..terms import interface_labels
-from .base import Glossary, Unit, UnitTranslation, protect, restore, translate_independently
+from ..terms import kept_terms
+from .base import (
+    Glossary,
+    Unit,
+    UnitTranslation,
+    protect,
+    restore,
+    translate_independently,
+)
 from .cache import glossary_id
 from .checks import NUMBER, lost_numbers
 
@@ -32,6 +39,7 @@ class OpusTranslator:
         languages: LanguagePair = EN_PT_BR,
     ):
         # Selects the target variant in a multilingual model (">>pob<<").
+        self.languages = languages
         self.target_token = languages.opus_token
         # Glossary terms are swapped for placeholders: kept as-is or replaced
         # by their fixed translation after the model runs.
@@ -69,9 +77,10 @@ class OpusTranslator:
         self._load("cpu")
 
     def translate_units(self, units: list[Unit]) -> list[UnitTranslation]:
-        # Names of screens and fields, set in italics by the document, are
-        # kept like the glossary's terms, for this document only.
-        labels = interface_labels(units)
+        # Names of screens and fields, set in italics by the document, and
+        # abbreviations used as they are ("N/A"), are kept like the
+        # glossary's terms, for this document only.
+        labels = kept_terms(units, self.languages)
         user = self.glossary
         if labels:
             self.glossary = Glossary(keep=labels).merged(user or Glossary())

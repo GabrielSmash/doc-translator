@@ -18,6 +18,9 @@ Checks, and the stage they watch:
 - grown_cells (translation): a one-line cell whose translation needs more
   lines or a smaller font.
 - headings_in_cells (analysis): table cells taken for section headings.
+- changed_form (translation): a short text (a cell, a label) whose
+  translation lost a sign standing apart ("Transmit –"), gained a final
+  period, or changed the case of its first letter ("no" -> "Não.").
 
 Usage:
     uv run python -m tools.defects --doc samples/7700.pdf --engine fast
@@ -41,6 +44,7 @@ CHECKS = (
     "lost_alignment",
     "grown_cells",
     "headings_in_cells",
+    "changed_form",
 )
 # Gaps between words of one line reach this many font sizes in justified text.
 WORD_GAP = 1.5
@@ -78,6 +82,7 @@ def find(original: pymupdf.Document, output: pymupdf.Document, result) -> list[F
             *_headings_in_cells(index, blocks, rules),
         ]
     findings += _misplaced_leaders(output, result)
+    findings += _changed_form(result)
     return findings
 
 
@@ -283,6 +288,25 @@ def _misplaced_leaders(output, result) -> list[Finding]:
             numbers = [w.lstrip(".") for w in on_row]
             if numbers != [leader.number]:
                 found.append(Finding("misplaced_leaders", index + 1, block.text, f"found {numbers}"))
+    return found
+
+
+def _changed_form(result) -> list[Finding]:
+    page_of = {id(b): index for index, blocks in enumerate(result.pages) for b in blocks}
+    found = []
+    for translated, unit, translation in zip(result.translated, result.units, result.translations):
+        source, text = unit.text.strip(), translation.text.strip()
+        if len(source.split()) > 4 or not text or source == text:
+            continue
+        signs = [t for t in source.split() if not any(c.isalnum() for c in t)]
+        problems = [f"lost {sign!r}" for sign in signs if sign not in text.split()]
+        if text[-1] in ".!?;:" and not source.endswith(text[-1]):
+            problems.append(f"added {text[-1]!r}")
+        if source[:1].islower() and text[:1].isupper() and text[1:2].islower():
+            problems.append("capitalized")
+        if problems:
+            page = page_of.get(id(translated.source), -1) + 1
+            found.append(Finding("changed_form", page, f"{source} -> {text}", ", ".join(problems)))
     return found
 
 

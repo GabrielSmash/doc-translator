@@ -77,6 +77,14 @@ def interface_labels(units) -> list[str]:
     return labels
 
 
+def kept_terms(units, languages=EN_PT_BR) -> list[str]:
+    """What both engines keep as written in this document: its interface
+    labels, and the abbreviations of the language pair it uses."""
+    text = "\n".join(u.text for u in units)
+    abbreviations = [a for a in sorted(languages.kept_abbreviations) if re.search(rf"(?<!\w){re.escape(a)}(?!\w)", text)]
+    return interface_labels(units) + abbreviations
+
+
 QUOTED = re.compile(r"[\"“”‘’'`]([^\"“”‘’'`]{2,60})[\"“”‘’'`]")
 
 

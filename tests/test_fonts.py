@@ -2,7 +2,6 @@ import pymupdf
 import pytest
 
 from doc_translator.fonts import FontLibrary, _normalize
-
 from tools.fixtures import LIBERATION_SANS as LIBERATION
 
 
