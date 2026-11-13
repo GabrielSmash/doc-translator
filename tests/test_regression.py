@@ -165,9 +165,9 @@ def defect_class(cause: str):
     return pytest.mark.xfail(reason=f"open: {cause}", strict=True)
 
 
-@defect_class("C1, lines read in pieces")
 @pytest.mark.parametrize("engine", ENGINES)
 def test_a_line_written_word_by_word_is_one_line(engine, fixture_paths):
+    """C1, fixed: pieces of one line are joined before forming paragraphs."""
     metrics = measured("split_line", engine, fixture_paths)
     assert metrics["split_lines"] == metrics["overlapping_text"] == 0
 

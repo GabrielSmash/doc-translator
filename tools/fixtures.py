@@ -189,21 +189,26 @@ def dark_band() -> bytes:
 
 
 def split_line() -> bytes:
-    """A justified line written one word at a time, as some word processors
-    do: the PDF gives each word its own block, and each was translated alone
-    and written over the paragraph (7700 manual, page 6)."""
+    """A justified paragraph written one word at a time, as some word
+    processors do: PyMuPDF reads each word as a line of its own, and each
+    was translated alone and written over the paragraph (7700 manual,
+    page 6)."""
     doc = pymupdf.open()
     page = doc.new_page(width=A4.width, height=A4.height)
     left, right, size = 80, 380, 10
-    page.insert_text((left, 100), "The rear panel kit consists of a screw and a lock washer,", fontname="helv", fontsize=size)
-    words = ["and", "two", "small", "subassemblies,", "the", "connector", "module"]
-    widths = [pymupdf.get_text_length(w, fontname="helv", fontsize=size) for w in words]
-    gap = (right - left - sum(widths)) / (len(words) - 1)
-    x = left
-    for word, width in zip(words, widths):
-        page.insert_text((x, 112), word, fontname="helv", fontsize=size)
-        x += width + gap
-    page.insert_text((left, 124), "and the rear plate that holds the connectors.", fontname="helv", fontsize=size)
+    justified = [
+        "The rear panel kit consists of a screw and a lock washer, and",
+        "two small subassemblies, the connector module and",
+    ]
+    for index, text in enumerate(justified):
+        words = text.split()
+        widths = [pymupdf.get_text_length(w, fontname="helv", fontsize=size) for w in words]
+        gap = (right - left - sum(widths)) / (len(words) - 1)
+        x = left
+        for word, width in zip(words, widths):
+            page.insert_text((x, 100 + 12 * index), word, fontname="helv", fontsize=size)
+            x += width + gap
+    page.insert_text((left, 124), "the rear plate that holds the connectors.", fontname="helv", fontsize=size)
     return doc.tobytes()
 
 

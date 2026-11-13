@@ -28,7 +28,7 @@ def read_page(page: pymupdf.Page) -> PageContent:
             spans = [span for s in raw["spans"] for span in _spans(s, links)]
             if spans:
                 lines.append(
-                    Line(spans, pymupdf.Rect(raw["bbox"]), tuple(raw["dir"]), origin=(b, n))
+                    Line(spans, pymupdf.Rect(raw["bbox"]), tuple(raw["dir"]), origins=((b, n),))
                 )
         blocks.append(TextBlock(pymupdf.Rect(block["bbox"]), lines))
     return PageContent(blocks=blocks, drawings=page.get_drawings(), links=links)

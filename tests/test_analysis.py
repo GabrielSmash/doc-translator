@@ -24,7 +24,7 @@ def unaccounted(page: pymupdf.Page) -> list[str]:
             if id(line) in seen:
                 return [f"line {line.text!r} in blocks {seen[id(line)]} and {index}"]
             seen[id(line)] = index
-            found.add(line.origin)
+            found.update(line.origins)
     return [f"page {page.number + 1}: line {origin} in no block" for origin in sorted(expected - found)]
 
 

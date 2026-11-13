@@ -58,9 +58,10 @@ class Line:
     bbox: pymupdf.Rect
     # Writing direction (cos, -sin of the angle): (1, 0) is horizontal.
     direction: tuple[float, float] = (1.0, 0.0)
-    # (block, line) of the PyMuPDF line it comes from: lets tests check that
-    # every line of the page ended up in a block.
-    origin: tuple[int, int] = (-1, -1)
+    # (block, line) of the PyMuPDF lines it comes from (several when one
+    # line was read in pieces): lets tests check that every line of the
+    # page ended up in a block.
+    origins: tuple[tuple[int, int], ...] = ()
 
     @property
     def text(self) -> str:
