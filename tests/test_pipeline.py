@@ -69,9 +69,37 @@ def test_progress_store_is_given_to_engines_that_resume(tmp_path):
             self.store = store
 
     engine = Resumable()
-    CachedTranslator(engine, TranslationCache(tmp_path / "cache.sqlite"))
+    CachedTranslator(engine, TranslationCache(tmp_path / "cache.sqlite")).translate_units([Unit("Hi")])
     engine.store.put_many({"Hello": "Olá"})
     assert engine.store.get_many(["Hello", "Bye"]) == {"Hello": "Olá"}
+
+
+def test_cache_is_separated_by_the_terms_a_document_keeps(tmp_path):
+    """Italic labels and kept abbreviations change the translation of every
+    paragraph using them: another document, other terms, other entries."""
+    cache = TranslationCache(tmp_path / "cache.sqlite")
+    engine = Counting()
+    CachedTranslator(engine, cache).translate_units([Unit("Pin 4 is unused")])
+    CachedTranslator(engine, cache).translate_units([Unit("Pin 4 is unused"), Unit("Other")])
+    # The same paragraph in a document that keeps "N/A": translated again.
+    CachedTranslator(engine, cache).translate_units([Unit("Pin 4 is unused"), Unit("N/A")])
+    assert engine.calls == [1, 1, 2]
+
+
+def test_cache_follows_the_translation_code(tmp_path, monkeypatch):
+    """A change to the engines' code translates again; a change elsewhere
+    (layout, drawing) does not."""
+    from doc_translator.translators import cache as cache_module
+
+    path = tmp_path / "cache.sqlite"
+    engine = Counting()
+    CachedTranslator(engine, TranslationCache(path)).translate_units([Unit("Hello")])
+    changed = tmp_path / "engine.py"
+    changed.write_text("# a new check")
+    monkeypatch.setattr(cache_module, "TRANSLATION_CODE", [*cache_module.TRANSLATION_CODE, changed])
+    CachedTranslator(engine, TranslationCache(path)).translate_units([Unit("Hello")])
+    assert engine.calls == [1, 1]
+    assert not any("layout" in str(p) or "draw" in str(p) for p in cache_module.TRANSLATION_CODE)
 
 
 # -- per-page isolation --------------------------------------------------------------

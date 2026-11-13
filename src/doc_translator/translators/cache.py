@@ -5,8 +5,10 @@ run) reuses what was already translated instead of paying for it again;
 with the LLM engine that is minutes per document.
 
 Entries are keyed by the translator's `cache_id` (engine, model, target
-language, glossary, program version) and the source text, so a change to
-any of them translates again instead of reusing a stale answer.
+language, glossary), the code that produces translations, the terms the
+document keeps as written, and the source text, so a change to any of them
+translates again instead of reusing a stale answer. Changing the layout or
+drawing code keeps the cache: that is what it is for.
 """
 
 import hashlib
@@ -17,15 +19,32 @@ import sqlite3
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
+from ..terms import kept_terms
 from .base import Translator, Unit, UnitTranslation
 
 log = logging.getLogger(__name__)
 
 try:
-    # A new version may translate differently (new checks, new prompts).
     VERSION = version("doc-translator")
 except PackageNotFoundError:
     VERSION = "dev"
+
+# Code whose changes change translations: the engines, their checks and
+# prompts, the terms kept as written. The package version alone missed
+# every change made between releases, and stale translations came back
+# (numbers reformatted, cells as sentences: 443 paragraphs reduced on the
+# IRS form instead of 89).
+_PACKAGE = Path(__file__).resolve().parent.parent
+TRANSLATION_CODE = sorted(
+    [*(_PACKAGE / "translators").glob("*.py"), _PACKAGE / "terms.py", _PACKAGE / "languages.py"]
+)
+
+
+def code_fingerprint() -> str:
+    digest = hashlib.sha256(VERSION.encode())
+    for path in TRANSLATION_CODE:
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:16]
 
 
 def default_path() -> Path:
@@ -87,14 +106,20 @@ class CachedTranslator:
 
     def __init__(self, translator: Translator, cache: TranslationCache) -> None:
         self.translator = translator
-        name = f"{VERSION}|{translator.cache_id}"
-        self.store = cache.namespace("units|" + name)
-        # Engines that translate for minutes save their progress as they go,
-        # so an interrupted run resumes where it stopped.
-        if hasattr(translator, "keep_progress"):
-            translator.keep_progress(cache.namespace("texts|" + name))
+        self.cache = cache
+        self.name = f"{code_fingerprint()}|{translator.cache_id}"
 
     def translate_units(self, units: list[Unit]) -> list[UnitTranslation]:
+        # Terms the document keeps as written (its italic labels, "N/A")
+        # change how every paragraph using them is translated.
+        languages = getattr(self.translator, "languages", None)
+        kept = kept_terms(units, languages) if languages else kept_terms(units)
+        name = f"{self.name}|{json.dumps(kept, ensure_ascii=False)}"
+        self.store = self.cache.namespace("units|" + name)
+        # Engines that translate for minutes save their progress as they go,
+        # so an interrupted run resumes where it stopped.
+        if hasattr(self.translator, "keep_progress"):
+            self.translator.keep_progress(self.cache.namespace("texts|" + name))
         # Labels decide which words stay untranslated, so they are part of the key.
         keys = [json.dumps([u.text, u.segments, u.labels], ensure_ascii=False) for u in units]
         found = self.store.get_many(keys)
