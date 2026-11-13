@@ -1,6 +1,8 @@
 """PyMuPDF lines -> visual lines: one per separate item, with small caps
 and links resolved."""
 
+import re
+
 import pymupdf
 
 from .model import FLAG_SUPERSCRIPT, Line, Span
@@ -13,6 +15,8 @@ COLUMN_GAP = 1.0
 # the gap, as justified text stretches its spaces on every line but the last.
 WORD_GAP = 0.6
 JUSTIFIED_GAP = 3.0
+DOT_LEADER = re.compile(r"^\s*(?:[.·…]\s?){4,}\s*$")
+DOTS = re.compile(r"^[\s.·…]+$")
 # A span this much smaller than the line's largest, with its baseline raised
 # by this fraction of its own size, is a superscript.
 SUPERSCRIPT_SIZE_RATIO = 0.85
@@ -55,23 +59,43 @@ def join_pieces(lines: list[Line], rules: list[pymupdf.Rect]) -> list[Line]:
     one inside a justified paragraph. `rules`: vertical rules; pieces on
     both sides of one are table cells.
     """
-    joined: list[Line] = []
+    # Forms draw their dot leaders one dot at a time: those make one leader
+    # first, which then joins the words before it.
+    dots: list[Line] = []
     for line in lines:
+        previous = dots[-1] if dots else None
+        if previous is not None and _same_leader(previous, line):
+            dots[-1] = _join(previous, line, space=False)
+        else:
+            dots.append(line)
+    joined: list[Line] = []
+    for line in dots:
         previous = joined[-1] if joined else None
-        if previous is not None and _same_line(previous, line, lines, rules):
+        if previous is not None and _same_line(previous, line, dots, rules):
             joined[-1] = _join(previous, line)
         else:
             joined.append(line)
     return joined
 
 
+def _same_leader(left: Line, right: Line) -> bool:
+    if not (DOTS.match(left.text) and DOTS.match(right.text)) or abs(left.baseline - right.baseline) > 1:
+        return False
+    gap = right.bbox.x0 - left.bbox.x1
+    return -1 <= gap <= JUSTIFIED_GAP * max(s.size for s in left.spans)
+
+
 def _same_line(left: Line, right: Line, lines: list[Line], rules: list[pymupdf.Rect]) -> bool:
     if not (left.horizontal and right.horizontal) or abs(left.baseline - right.baseline) > 1:
         return False
-    # Dot leaders and other runs of symbols stay apart: they are kept as
-    # they are, not translated with the words beside them.
-    if not all(any(c.isalnum() for c in piece.text) for piece in (left, right)):
+    # Runs of symbols stay apart: they are kept as they are, not translated
+    # with the words beside them. Except dot leaders after the words ("...
+    # Otherwise, (b) is more accurate . . . . ☐"): joined, the leader is
+    # redrawn after the translation instead of being written over by it.
+    if not any(c.isalnum() for c in left.text):
         return False
+    if not any(c.isalnum() for c in right.text):
+        return bool(DOT_LEADER.match(right.text))
     size = max(s.size for s in left.spans)
     gap = right.bbox.x0 - left.bbox.x1
     if not -1 <= gap <= JUSTIFIED_GAP * size:
@@ -88,9 +112,9 @@ def _same_line(left: Line, right: Line, lines: list[Line], rules: list[pymupdf.R
     )
 
 
-def _join(left: Line, right: Line) -> Line:
+def _join(left: Line, right: Line, space: bool = True) -> Line:
     spans = list(left.spans)
-    if not left.text.endswith(" ") and not right.text.startswith(" "):
+    if space and not left.text.endswith(" ") and not right.text.startswith(" "):
         last = spans[-1]
         spans[-1] = Span(**{**last.__dict__, "text": last.text + " "})
     return Line(spans + right.spans, left.bbox | right.bbox, left.direction, left.origins + right.origins)

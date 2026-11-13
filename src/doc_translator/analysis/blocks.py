@@ -11,8 +11,11 @@ from .model import Block, Kind, Leader, Line
 MARKER = r"([•◦▪●■\-–*]|\d{1,3}(?:\.\d{1,3})*[.)]|[a-zA-Z][.)])"
 # Table-of-contents ending: "........ 15"
 LEADER = re.compile(r"\s*(?:[.·…]\s?){4,}\s*(\d+|[ivxlcdm]+)?\s*$", re.IGNORECASE)
-LIST_MARKER = re.compile(rf"^\s*{MARKER}\s+")
-MARKER_ONLY = re.compile(rf"^\s*{MARKER}\s*$")
+# "(a)", "(2)": forms number their items this way. Running text also wraps
+# with "(b) is more accurate" first, so such an item starts with a capital.
+PARENTHESIZED = r"(\((?:[a-zA-Z]|\d{1,2}|[ivx]{1,4})\))"
+LIST_MARKER = re.compile(rf"^\s*(?:{MARKER}\s+|{PARENTHESIZED}\s+(?=[A-Z]))")
+MARKER_ONLY = re.compile(rf"^\s*(?:{MARKER}|{PARENTHESIZED})\s*$")
 SYMBOL_FONTS = ("symbol", "wingdings", "dingbats", "webdings")
 # Number of a bibliography entry: "[33] Nitish Srivastava, ...". Unlike a
 # list marker it does not start a block on its own, since running text can

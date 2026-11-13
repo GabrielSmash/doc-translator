@@ -145,3 +145,32 @@ def test_lines_ended_by_hand_are_not_joined():
     assert "<1> Network Setup" in texts and "**** Main Menu ****" in texts
     assert "Choose one of the menu choices with the letter or number on the left and press Enter." in texts
     assert "7700 MultiFrame Manual" in texts
+
+
+def test_form_items_numbered_in_parentheses():
+    page = page_with(
+        ("(a) Use the estimator for the most accurate withholding.", (72, 72), {}),
+        ("(c)", (72, 100), {}),
+        ("If there are only two jobs total, check this box.", (95, 100), {}),
+        ("so the result in (b) applies to both jobs, and", (72, 140), {}),
+        ("(b) is more accurate for them.", (72, 152), {}),
+    )
+    blocks = analyze_page(page)
+    item = next(b for b in blocks if "estimator" in b.text)
+    assert item.prefix.strip() == "(a)" and item.kind == Kind.LIST_ITEM
+    alone = next(b for b in blocks if b.text == "(c)")
+    assert (alone.kind, alone.action) == (Kind.MARKER, Action.KEEP)
+    # Wrapped running text starting with "(b)" stays in its paragraph.
+    running = next(b for b in blocks if "applies" in b.text)
+    assert "(b) is more accurate" in running.text
+
+
+def test_a_dot_leader_drawn_dot_by_dot_follows_its_words():
+    """Forms draw leaders one dot at a time: joined to the words, the
+    leader is redrawn after the translation instead of under it."""
+    dots = [(".", (300 + 12 * i, 72), {}) for i in range(10)]
+    page = page_with(("Otherwise, (b) is more accurate", (72, 72), {}), *dots)
+    blocks = analyze_page(page)
+    assert len(blocks) == 1
+    assert blocks[0].text == "Otherwise, (b) is more accurate"
+    assert blocks[0].leader is not None and blocks[0].leader.number == ""

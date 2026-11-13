@@ -34,7 +34,7 @@ import pymupdf
 
 from doc_translator.analysis import Action, Kind
 from doc_translator.analysis.graphics import separating_rules
-from doc_translator.pdf.read import read_page
+from doc_translator.pdf.read import MIN_COLUMN_RULE, read_page
 
 CHECKS = (
     "split_lines",
@@ -97,7 +97,8 @@ def _rules(page: pymupdf.Page) -> list[pymupdf.Rect]:
     """Table and frame rules of the original page, underlines left out."""
     content = read_page(page)
     lines = [line for block in content.blocks for line in block.lines]
-    return separating_rules(lines, content.drawings)
+    # Curves are drawn as many tiny strokes: those are drawings, not rules.
+    return [r for r in separating_rules(lines, content.drawings) if max(r.width, r.height) >= MIN_COLUMN_RULE]
 
 
 def _ink(rect: pymupdf.Rect) -> pymupdf.Rect:
@@ -298,7 +299,8 @@ def _changed_form(result) -> list[Finding]:
         source, text = unit.text.strip(), translation.text.strip()
         if len(source.split()) > 4 or not text or source == text:
             continue
-        signs = [t for t in source.split() if not any(c.isalnum() for c in t)]
+        # "&" may become a word ("e"), as a reader writes it.
+        signs = [t for t in source.split() if not any(c.isalnum() for c in t) and t != "&"]
         problems = [f"lost {sign!r}" for sign in signs if sign not in text.split()]
         if text[-1] in ".!?;:" and not source.endswith(text[-1]):
             problems.append(f"added {text[-1]!r}")

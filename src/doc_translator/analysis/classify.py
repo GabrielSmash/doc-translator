@@ -47,7 +47,7 @@ def classify(blocks: list[Block]) -> None:
     # Side by side on a baseline, or boxed in by rules next to other boxes.
     cells = _table_cells(translated) | in_table({id(b): b.cell for b in translated if b.cell is not None})
     for block in translated:
-        if block.leader:
+        if block.leader and block.leader.number:
             block.kind = Kind.TOC_ENTRY
         elif block.prefix:
             block.kind = Kind.LIST_ITEM
