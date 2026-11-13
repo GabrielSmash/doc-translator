@@ -94,17 +94,23 @@ def _harmonize(
     """Give the paragraphs of one style on the page one size: the smallest
     any of them needs, rounded down to a step."""
     groups: dict[tuple, list[int]] = defaultdict(list)
+    unchanged: set[int] = set()
     for index, placement in enumerate(placements):
         paragraph = placement.paragraph
-        # Text the translation left as it was (numbers, names) fits where it
-        # was: shrinking it with its style would only make it smaller.
-        if "".join(r.text for r in paragraph.runs).split() == paragraph.source.text.split():
-            continue
         groups[_style_key(paragraph)].append(index)
+        if "".join(r.text for r in paragraph.runs).split() == paragraph.source.text.split():
+            unchanged.add(index)
     for indexes in groups.values():
         # Less than half a step is a rounding difference with the original
-        # (its text fitted there): that paragraph alone takes it.
-        shared = [i for i in indexes if SHARED_SCALE_MIN <= placements[i].scale < 1 - SCALE_STEP / 2]
+        # (its text fitted there): that paragraph alone takes it. Text the
+        # translation left as it was (numbers, names) fits where it was: it
+        # does not set the size, but takes it, or a table mixes sizes cell
+        # by cell.
+        shared = [
+            i
+            for i in indexes
+            if i not in unchanged and SHARED_SCALE_MIN <= placements[i].scale < 1 - SCALE_STEP / 2
+        ]
         if not shared:
             continue
         size = _step_down(min(placements[i].scale for i in shared))

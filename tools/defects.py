@@ -18,6 +18,8 @@ Checks, and the stage they watch:
 - grown_cells (translation): a one-line cell whose translation needs more
   lines or a smaller font.
 - headings_in_cells (analysis): table cells taken for section headings.
+- mixed_sizes (layout): text of one style on a page written in different
+  sizes, other than a paragraph shrunk alone to fit (below 85%).
 - changed_form (translation): a short text (a cell, a label) whose
   translation lost a sign standing apart ("Transmit –"), gained a final
   period, or changed the case of its first letter ("no" -> "Não.").
@@ -45,6 +47,7 @@ CHECKS = (
     "grown_cells",
     "headings_in_cells",
     "changed_form",
+    "mixed_sizes",
 )
 # Gaps between words of one line reach this many font sizes in justified text.
 WORD_GAP = 1.5
@@ -80,6 +83,7 @@ def find(original: pymupdf.Document, output: pymupdf.Document, result) -> list[F
             *_lost_alignment(index, placed, rules),
             *_grown_cells(index, placed, rules),
             *_headings_in_cells(index, blocks, rules),
+            *_mixed_sizes(index, placed),
         ]
     findings += _misplaced_leaders(output, result)
     findings += _changed_form(result)
@@ -264,6 +268,22 @@ def _headings_in_cells(index: int, blocks, rules) -> list[Finding]:
         if block.kind == Kind.HEADING
         and len(block.lines) == 1
         and any(other is not block and adjacent(cell, c) for other, c in cells)
+    ]
+
+
+def _mixed_sizes(index: int, placed) -> list[Finding]:
+    from doc_translator.layout import SCALE_STEP, SHARED_SCALE_MIN, _style_key
+
+    sizes: dict[tuple, set[float]] = {}
+    for placement in placed:
+        if placement.scale >= SHARED_SCALE_MIN and placement.lines:
+            # Less than half a step from full size cannot be seen.
+            scale = 1.0 if placement.scale >= 1 - SCALE_STEP / 2 else round(placement.scale, 2)
+            sizes.setdefault(_style_key(placement.paragraph), set()).add(scale)
+    return [
+        Finding("mixed_sizes", index + 1, f"{key[0]} {key[1]:.1f}pt", " ".join(f"{s:.0%}" for s in sorted(found)))
+        for key, found in sizes.items()
+        if len(found) > 1
     ]
 
 

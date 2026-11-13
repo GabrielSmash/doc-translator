@@ -419,6 +419,7 @@ SUMMARY = [
     ("grown_cells", "cells"),
     ("headings_in_cells", "cellhead"),
     ("changed_form", "form"),
+    ("mixed_sizes", "mixed"),
 ]
 
 
