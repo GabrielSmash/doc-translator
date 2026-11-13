@@ -155,3 +155,40 @@ def test_output_is_not_inflated(name):
     paragraphs of a page are drawn as one piece of content, not one per
     paragraph (681 on the IRS form)."""
     assert measured(name, "identity")["size_ratio"] <= 1.5
+
+
+# -- defect classes (tools/defects.py) -------------------------------------------
+# One fixture reproduces each class; the whole corpus is counted in the baseline.
+
+
+def defect_class(cause: str):
+    return pytest.mark.xfail(reason=f"open: {cause}", strict=True)
+
+
+@defect_class("C1, lines read in pieces")
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_line_written_word_by_word_is_one_line(engine, fixture_paths):
+    metrics = measured("split_line", engine, fixture_paths)
+    assert metrics["split_lines"] == metrics["overlapping_text"] == 0
+
+
+@defect_class("C2, text leaves its cell")
+def test_table_text_stays_in_its_cell(fixture_paths):
+    metrics = measured("ruled_table", "pseudo", fixture_paths)
+    assert metrics["crossed_rules"] == 0
+
+
+@defect_class("C3, alignment of one-line cells")
+def test_centered_cells_stay_centered(fixture_paths):
+    assert measured("ruled_table", "pseudo", fixture_paths)["lost_alignment"] == 0
+
+
+@defect_class("C4, leaders placed by reading the page back")
+@pytest.mark.parametrize("engine", ENGINES)
+def test_page_numbers_stay_on_their_entry(engine, fixture_paths):
+    assert measured("toc_leaders", engine, fixture_paths)["misplaced_leaders"] == 0
+
+
+@defect_class("C5, cells taken for headings")
+def test_table_header_cells_are_not_headings(fixture_paths):
+    assert measured("bordered_table", "identity", fixture_paths)["headings_in_cells"] == 0

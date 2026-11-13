@@ -188,6 +188,90 @@ def dark_band() -> bytes:
     return doc.tobytes()
 
 
+def split_line() -> bytes:
+    """A justified line written one word at a time, as some word processors
+    do: the PDF gives each word its own block, and each was translated alone
+    and written over the paragraph (7700 manual, page 6)."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    left, right, size = 80, 380, 10
+    page.insert_text((left, 100), "The rear panel kit consists of a screw and a lock washer,", fontname="helv", fontsize=size)
+    words = ["and", "two", "small", "subassemblies,", "the", "connector", "module"]
+    widths = [pymupdf.get_text_length(w, fontname="helv", fontsize=size) for w in words]
+    gap = (right - left - sum(widths)) / (len(words) - 1)
+    x = left
+    for word, width in zip(words, widths):
+        page.insert_text((x, 112), word, fontname="helv", fontsize=size)
+        x += width + gap
+    page.insert_text((left, 124), "and the rear plate that holds the connectors.", fontname="helv", fontsize=size)
+    return doc.tobytes()
+
+
+def ruled_table() -> bytes:
+    """A table ruled on every side: labels on the left, centered values (some
+    bold), a label that just fits its cell (7700 manual, pages 9 and 14).
+
+    Text must stay inside its cell, centered values stay centered, and bold
+    values are cells, not section headings.
+    """
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    page.insert_text((80, 90), "Configure the port settings of the terminal program as follows:", fontname="helv", fontsize=10)
+    columns = [150, 214, 270, 360]
+    rows = [
+        ("Baud", "57600", "Transmit +"),
+        ("Data bits", "8", "Transmit -"),
+        ("Parity", "None", "N/A"),
+        ("Stop bits", "2", "Receive +"),
+        ("Flow Control", "Hardware", "N/A"),
+    ]
+    top, height, size = 104, 11.5, 9
+    for index, cells in enumerate(rows):
+        baseline = top + index * height + 8.8
+        page.insert_text((columns[0] + 2, baseline), cells[0], fontname="helv", fontsize=size)
+        for column, text in enumerate(cells[1:], 1):
+            font = "hebo" if column == 1 else "helv"
+            width = pymupdf.get_text_length(text, fontname=font, fontsize=size)
+            center = (columns[column] + columns[column + 1]) / 2
+            page.insert_text((center - width / 2, baseline), text, fontname=font, fontsize=size)
+    bottom = top + len(rows) * height
+    for index in range(len(rows) + 1):
+        y = top + index * height
+        page.draw_line((columns[0], y), (columns[-1], y), width=0.5)
+    for x in columns:
+        page.draw_line((x, top), (x, bottom), width=0.5)
+    page.insert_text((80, bottom + 24), "Install the card into the frame after the settings are saved.", fontname="helv", fontsize=10)
+    return doc.tobytes()
+
+
+def toc_leaders() -> bytes:
+    """A table of contents: dot leaders and page numbers, some bold. Each
+    number must stay on its own entry's row (7700 manual, page 2)."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    entries = [
+        (80, "1.  OVERVIEW", "1", True),
+        (80, "2.  INSTALLATION", "2", True),
+        (100, "2.1.  Installing the Module Rear Plate", "2", False),
+        (100, "2.2.  Rear Panel Connections", "3", False),
+        (120, "2.2.1.  Ethernet Connection", "3", False),
+        (120, "2.2.2.  Serial Port Connections", "4", False),
+        (80, "3.  SPECIFICATIONS", "6", True),
+    ]
+    right, size = 500, 10
+    for index, (left, title, number, bold) in enumerate(entries):
+        font = "hebo" if bold else "helv"
+        baseline = 100 + index * 13
+        title_width = pymupdf.get_text_length(title + " ", fontname=font, fontsize=size)
+        number_width = pymupdf.get_text_length(number, fontname=font, fontsize=size)
+        dot = pymupdf.get_text_length(".", fontname=font, fontsize=size)
+        dots = "." * int((right - number_width - left - title_width) / dot - 1)
+        line = f"{title} {dots}"
+        page.insert_text((left, baseline), line, fontname=font, fontsize=size)
+        page.insert_text((right - number_width, baseline), number, fontname=font, fontsize=size)
+    return doc.tobytes()
+
+
 FIXTURES = {
     "styled_text": styled_text,
     "bordered_table": bordered_table,
@@ -196,6 +280,9 @@ FIXTURES = {
     "blank_ligatures": blank_ligatures,
     "internal_links": internal_links,
     "dark_band": dark_band,
+    "split_line": split_line,
+    "ruled_table": ruled_table,
+    "toc_leaders": toc_leaders,
 }
 
 

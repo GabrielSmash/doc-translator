@@ -9,7 +9,7 @@ import html
 import math
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pymupdf
 
@@ -60,6 +60,15 @@ class Placement:
     css: str
     scale: float  # 1.0 = original font size
     fitted: bool  # False: the text overflows the box even when scaled
+    # Where the lines were written, as measured: drawing places leaders by
+    # them, and quality checks compare them with the original lines.
+    lines: list["WrittenLine"] = field(default_factory=list)
+
+
+@dataclass
+class WrittenLine:
+    rect: pymupdf.Rect  # the line's box
+    baseline: float
 
 
 def layout_page(
@@ -175,11 +184,12 @@ def _place_in(
 
     rect = pymupdf.Rect(rect.x0, top, rect.x1, max(limit, last_baseline) + bottom_part + GAP)
     if last_baseline <= limit + TOLERANCE:
-        return Placement(paragraph, rect, html_text, css, size, fitted=True)
+        lines = [WrittenLine(line.rect + (0, shift, 0, shift), line.baseline + shift) for line in measured.lines]
+        return Placement(paragraph, rect, html_text, css, size, fitted=True, lines=lines)
     # Too long for the room: the HTML engine shrinks it to the allowed height.
     rect.y1 = limit + bottom_part + TOLERANCE
-    spare_height, scale = _fit(page_rect, rect, html_text, css, fonts.archive)
-    return Placement(paragraph, rect, html_text, css, size * scale, fitted=spare_height >= 0)
+    spare_height, scale, lines = _fit(page_rect, rect, html_text, css, fonts.archive)
+    return Placement(paragraph, rect, html_text, css, size * scale, fitted=spare_height >= 0, lines=lines)
 
 
 @dataclass
@@ -187,6 +197,7 @@ class _Measured:
     first_baseline: float
     last_baseline: float
     bottom: float  # bottom of the written content
+    lines: list[WrittenLine]
 
 
 def _scratch_page(page_rect: pymupdf.Rect) -> pymupdf.Page:
@@ -203,16 +214,11 @@ def _measure(
     """Write the paragraph on a scratch page and read where its lines fell."""
     page = _scratch_page(page_rect)
     spare_height, _ = page.insert_htmlbox(rect, html_text, css=css, archive=archive)
-    # Each line's baseline is its largest span's: superscripts sit above it.
-    baselines = [
-        max(spans, key=lambda s: s["size"])["origin"][1]
-        for block in page.get_text("dict")["blocks"]
-        for line in block.get("lines", [])
-        if (spans := [s for s in line["spans"] if s["text"].strip()])
-    ]
-    if not baselines:
+    lines = _written_lines(page)
+    if not lines:
         return None
-    return _Measured(baselines[0], max(baselines), rect.y1 - spare_height)
+    baselines = [line.baseline for line in lines]
+    return _Measured(baselines[0], max(baselines), rect.y1 - spare_height, lines)
 
 
 def _fit(
@@ -221,9 +227,26 @@ def _fit(
     html_text: str,
     css: str,
     archive: pymupdf.Archive,
-) -> tuple[float, float]:
-    """(spare height, scale) of the paragraph written into `rect`."""
-    return _scratch_page(page_rect).insert_htmlbox(rect, html_text, css=css, archive=archive)
+) -> tuple[float, float, list[WrittenLine]]:
+    """(spare height, scale, lines) of the paragraph written into `rect`."""
+    page = _scratch_page(page_rect)
+    spare_height, scale = page.insert_htmlbox(rect, html_text, css=css, archive=archive)
+    return spare_height, scale, _written_lines(page)
+
+
+def _written_lines(page: pymupdf.Page) -> list[WrittenLine]:
+    """The lines on a scratch page, in reading order. Each line's baseline is
+    its largest span's: superscripts sit above it."""
+    lines = []
+    for block in page.get_text("dict")["blocks"]:
+        for line in block.get("lines", []):
+            spans = [s for s in line["spans"] if s["text"].strip()]
+            if spans:
+                rect = pymupdf.Rect(spans[0]["bbox"])
+                for span in spans[1:]:
+                    rect |= span["bbox"]
+                lines.append(WrittenLine(rect, max(spans, key=lambda s: s["size"])["origin"][1]))
+    return lines
 
 
 # Where letters reach, in font sizes, from the baseline: capitals and

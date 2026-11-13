@@ -34,7 +34,7 @@ from doc_translator.pdf.read import TEXT_FLAGS, link_key
 from doc_translator.pipeline import save, translate_document
 from doc_translator.translators import Unit, UnitTranslation
 
-from . import corpus, fixtures
+from . import corpus, defects, fixtures
 
 BASELINE = Path(__file__).resolve().parent.parent / "tests" / "baseline.json"
 DETERMINISTIC_ENGINES = ("identity", "pseudo")
@@ -64,6 +64,7 @@ LOWER_IS_BETTER = {
     "overlaps_added",
     "size_ratio",
     "numbers_lost_pct",
+    *defects.CHECKS,
 }
 
 
@@ -146,6 +147,7 @@ def measure(path: Path, engine, engine_name: str, pages: tuple[int, int] | None 
             **_layout(original, output),
             **_searchable(output, result),
             **_kept(output, result),
+            **defects.counts(defects.find(original, output, result)),
         }
     if engine_name not in ("identity",):
         metrics |= _translation(result)
@@ -409,6 +411,13 @@ SUMMARY = [
     ("layout_row_corr_mean", "rowcorr"),
     ("size_ratio", "size×"),
     ("numbers_lost_pct", "num-%"),
+    ("split_lines", "split"),
+    ("overlapping_text", "overlap"),
+    ("crossed_rules", "rules"),
+    ("misplaced_leaders", "leaders"),
+    ("lost_alignment", "align"),
+    ("grown_cells", "cells"),
+    ("headings_in_cells", "cellhead"),
 ]
 
 
