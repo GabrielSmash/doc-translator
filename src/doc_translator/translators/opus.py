@@ -77,13 +77,13 @@ class OpusTranslator:
         self._load("cpu")
 
     def translate_units(self, units: list[Unit]) -> list[UnitTranslation]:
-        # Names of screens and fields, set in italics by the document, and
-        # abbreviations used as they are ("N/A"), are kept like the
-        # glossary's terms, for this document only.
-        labels = kept_terms(units, self.languages)
+        # Names of screens and fields, set in italics, shown on screens or
+        # quoted by instructions, and abbreviations used as they are ("N/A"),
+        # are kept like the glossary's terms, for this document only.
+        kept = kept_terms(units, self.languages)
         user = self.glossary
-        if labels:
-            self.glossary = Glossary(keep=labels).merged(user or Glossary())
+        if kept.kept():
+            self.glossary = kept.merged(user or Glossary())
         try:
             return translate_independently(self.translate, units)
         finally:

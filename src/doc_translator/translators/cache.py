@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import sqlite3
+from dataclasses import asdict
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -114,7 +115,7 @@ class CachedTranslator:
         # change how every paragraph using them is translated.
         languages = getattr(self.translator, "languages", None)
         kept = kept_terms(units, languages) if languages else kept_terms(units)
-        name = f"{self.name}|{json.dumps(kept, ensure_ascii=False)}"
+        name = f"{self.name}|{json.dumps(asdict(kept), ensure_ascii=False)}"
         self.store = self.cache.namespace("units|" + name)
         # Engines that translate for minutes save their progress as they go,
         # so an interrupted run resumes where it stopped.

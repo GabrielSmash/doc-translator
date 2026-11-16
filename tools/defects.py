@@ -395,19 +395,15 @@ def _changed_tokens(result) -> list[Finding]:
 
 
 def _translated_names(result) -> list[Finding]:
-    import re
-
     from doc_translator.terms import kept_terms
 
-    names = kept_terms(result.units)
+    kept = kept_terms(result.units)
     page_of = {id(b): index for index, blocks in enumerate(result.pages) for b in blocks}
     found = []
     for translated, unit, translation in zip(result.translated, result.units, result.translations):
-        for name in names:
-            mentioned = re.search(rf"(?<!\w){re.escape(name)}(?!\w)", unit.text)
-            if mentioned and name.lower() not in translation.text.lower():
-                page = page_of.get(id(translated.source), -1) + 1
-                found.append(Finding("translated_names", page, unit.text, f"{name!r} -> {translation.text[:60]!r}"))
+        for name in kept.violations(unit.text, translation.text):
+            page = page_of.get(id(translated.source), -1) + 1
+            found.append(Finding("translated_names", page, unit.text, f"{name!r} -> {translation.text[:60]!r}"))
     return found
 
 

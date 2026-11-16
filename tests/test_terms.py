@@ -1,5 +1,5 @@
-from doc_translator.terms import recurring_terms
-from doc_translator.translators.base import Glossary
+from doc_translator.terms import kept_terms, quoted_names, recurring_terms
+from doc_translator.translators.base import Glossary, Unit
 
 TEXTS = [
     "Once the Frame Controller is connected, open the Network Setup menu and press Enter.",
@@ -38,3 +38,41 @@ def test_quoted_terms_are_ui_labels():
     texts = ["Expose the module using ‘Add/Update Frame’ and select the “Upload Main Program” prompt."]
     terms = ["Add/Update Frame", "Upload Main Program", "Power Supply"]
     assert quoted_terms(texts, terms) == {"Add/Update Frame", "Upload Main Program"}
+
+
+def test_a_screen_name_also_written_as_text_is_kept_only_with_its_capitals():
+    units = [
+        Unit("Select <1> to open Main Menu and then Network Setup.", names=["Main Menu", "Network Setup", "Exit"]),
+        Unit("From the main menu, exit and save. Exit the menu now."),
+    ]
+    kept = kept_terms(units)
+    assert kept.exact == ["Main Menu"]
+    assert "Network Setup" in kept.keep
+    assert "Exit" not in kept.kept()  # one word: it also starts sentences
+    pattern = kept.pattern()
+    assert pattern.search("open Main Menu")
+    assert not pattern.search("from the main menu")
+
+
+def test_names_an_instruction_points_at_are_kept_where_quoted():
+    units = [
+        Unit("Enter “customer” for both “User” and “Password” prompts."),
+        Unit("Select the ‘Control’ tab, then select ‘View configuration’."),
+        Unit("This item defines the “subnet mask” of the network."),
+        Unit("If you are building a “crossover” cable, wire it as shown."),
+        Unit("Connect the PC’s network card to the hub."),
+    ]
+    assert quoted_names(units) == ["customer", "User", "Password", "Control", "View configuration"]
+    kept = kept_terms(units)
+    pattern = kept.pattern()
+    assert pattern.search("press the ‘Control’ tab")
+    assert not pattern.search("Control the LEDs")
+    assert kept.violations("Select the ‘Control’ tab.", "Selecione a aba 'Controle'.") == ["Control"]
+    assert kept.violations("Select the ‘Control’ tab.", "Selecione a aba 'Control'.") == []
+
+
+def test_kept_terms_are_whole_words():
+    glossary = Glossary(keep=["IP Address"], exact=["Network Setup"])
+    assert glossary.relevant("Set the IP addresses.", "English") == ""
+    assert glossary.violations("Set the IP addresses.", "Defina os endereços IP.") == []
+    assert glossary.violations("Set the IP Address.", "Defina o endereço IP.") == ["IP Address"]

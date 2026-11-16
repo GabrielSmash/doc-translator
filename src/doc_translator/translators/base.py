@@ -47,12 +47,24 @@ class UnitTranslation:
     segments: list[str]
 
 
+# Quotation marks around a name the reader finds on screen ("the ‘Control’ tab").
+QUOTES = "\"“”‘’'`"
+
+
 @dataclass
 class Glossary:
-    """Terms to keep in the source language and terms with a fixed translation."""
+    """Terms to keep in the source language and terms with a fixed translation.
+
+    `keep` terms are kept however they are written; `exact` ones only with
+    their capitals ("Main Menu", while "the main menu" is ordinary text);
+    `quoted` ones only between quotation marks ("press the ‘Enter’ key",
+    while "Enter the address" is a sentence).
+    """
 
     keep: list[str] = field(default_factory=list)
     terms: dict[str, str] = field(default_factory=dict)
+    exact: list[str] = field(default_factory=list)
+    quoted: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path) -> "Glossary":
@@ -62,16 +74,32 @@ class Glossary:
 
     def merged(self, other: "Glossary") -> "Glossary":
         """`other` wins on conflicts (e.g. the user's glossary)."""
-        terms = {k: v for k, v in self.terms.items() if k not in other.keep}
+        kept = {k.lower() for k in [*other.keep, *other.exact, *other.quoted]}
+        terms = {k: v for k, v in self.terms.items() if k.lower() not in kept}
         terms.update(other.terms)
         keep = [k for k in dict.fromkeys(self.keep + other.keep) if k not in other.terms]
-        return Glossary(keep=keep, terms=terms)
+        return Glossary(
+            keep=keep,
+            terms=terms,
+            exact=list(dict.fromkeys(self.exact + other.exact)),
+            quoted=list(dict.fromkeys(self.quoted + other.quoted)),
+        )
 
     def relevant(self, text: str, source_language: str) -> str:
         """Glossary lines for the terms that occur in `text` (for prompts)."""
         lower = text.lower()
         lines = [
-            f'- "{term}": keep in {source_language}' for term in self.keep if term.lower() in lower
+            f'- "{term}": keep in {source_language}' for term in self.keep if _word(term, re.IGNORECASE).search(text)
+        ]
+        lines += [
+            f'- "{term}": keep in {source_language} where written with these capitals'
+            for term in self.exact
+            if _word(term).search(text)
+        ]
+        lines += [
+            f'- "{term}": keep in {source_language} where quoted'
+            for term in self.quoted
+            if _quoted(term).search(text)
         ]
         lines += [
             f'- "{source}" -> "{target}"'
@@ -87,7 +115,13 @@ class Glossary:
         ("controladores de quadro" for "controlador de quadro") still match.
         """
         source_lower, translated = source.lower(), _fold(translation)
-        missing = [t for t in self.keep if t.lower() in source_lower and _fold(t) not in translated]
+        # Kept terms as whole words: "IP Address" is not in "IP addresses".
+        missing = [t for t in self.keep if _word(t, re.IGNORECASE).search(source) and _fold(t) not in translated]
+        # Compared as whole words ("Controle" holds "Control"), in Unicode's
+        # compatible form ("Browse…" written "Browse...").
+        plain = unicodedata.normalize("NFKC", translation)
+        missing += [t for t in self.exact if _word(t).search(source) and not _word(t).search(plain)]
+        missing += [t for t in self.quoted if _quoted(t).search(source) and not _word(t).search(plain)]
         for term, target in self.terms.items():
             if term.lower() in source_lower and not all(
                 _stem(word) in translated for word in _fold(target).split() if len(word) > 3
@@ -97,12 +131,13 @@ class Glossary:
 
     def pattern(self) -> re.Pattern | None:
         """Regex matching every glossary term, longest first."""
-        words = sorted([*self.keep, *self.terms], key=len, reverse=True)
-        if not words:
+        alternatives = [(w, re.escape(w)) for w in [*self.keep, *self.terms]]
+        alternatives += [(w, f"(?-i:{re.escape(w)})") for w in self.exact]
+        alternatives += [(w, f"(?<=[{QUOTES}])(?-i:{re.escape(w)})(?=[{QUOTES}])") for w in self.quoted]
+        if not alternatives:
             return None
-        return re.compile(
-            r"(?<!\w)(?:" + "|".join(re.escape(w) for w in words) + r")(?!\w)", re.IGNORECASE
-        )
+        ordered = sorted(alternatives, key=lambda a: len(a[0]), reverse=True)
+        return re.compile(r"(?<!\w)(?:" + "|".join(a for _, a in ordered) + r")(?!\w)", re.IGNORECASE)
 
     def replacement(self, term: str) -> str:
         """What a protected glossary term becomes in the translation."""
@@ -110,6 +145,18 @@ class Glossary:
             if source.lower() == term.lower():
                 return target
         return term
+
+    def kept(self) -> list[str]:
+        return [*self.keep, *self.exact, *self.quoted]
+
+
+def _word(term: str, flags: int = 0) -> re.Pattern:
+    term = unicodedata.normalize("NFKC", term)
+    return re.compile(rf"(?<!\w){re.escape(term)}(?!\w)", flags)
+
+
+def _quoted(term: str) -> re.Pattern:
+    return re.compile(f"[{QUOTES}]{re.escape(term)}[{QUOTES}]")
 
 
 def _fold(text: str) -> str:

@@ -92,8 +92,8 @@ class Pseudo:
         from doc_translator.terms import kept_terms
         from doc_translator.translators.checks import CODE
 
-        kept = [re.escape(t) for t in sorted(kept_terms(units), key=len, reverse=True)]
-        self._kept = re.compile("|".join([*kept, CODE.pattern]))
+        kept = kept_terms(units).pattern()
+        self._kept = re.compile("|".join([*([kept.pattern] if kept else []), CODE.pattern]), re.IGNORECASE)
         return [UnitTranslation(self._text(u.text), [self._text(s) for s in u.segments]) for u in units]
 
     def _text(self, text: str) -> str:

@@ -333,3 +333,17 @@ def test_a_code_dropped_twice_is_named_in_a_last_try():
     assert "RJ45" in llm.prompts[1][0]["content"]  # codes listed in the first retry
     assert "dropped or changed these" in llm.prompts[2][0]["content"]
     assert "dropped" not in llm.prompts[1][0]["content"]
+
+
+def test_a_name_translated_twice_is_named_in_a_last_try():
+    llm = FakeLLM(
+        [
+            json.dumps({"translations": ["A Configuração de SNMP é usada para destinos de trap."]}),
+            "A Configuração de SNMP é usada para destinos de trap.",
+            "SNMP Setup é usado para destinos de trap.",
+        ],
+        glossary=Glossary(keep=["SNMP Setup"]),
+    )
+    results = llm.translate_units([Unit("SNMP Setup is used to identify trap destinations.")])
+    assert results[0].text == "SNMP Setup é usado para destinos de trap."
+    assert "dropped or changed these; write each exactly as given: SNMP Setup" in llm.prompts[2][0]["content"]

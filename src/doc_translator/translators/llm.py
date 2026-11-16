@@ -132,13 +132,9 @@ class LLMTranslator:
 
     def translate_units(self, units: list[Unit]) -> list[UnitTranslation]:
         glossary = self._build_glossary(units)
-        # Names of screens and fields, set in italics by the document, and
-        # abbreviations used as they are ("N/A").
-        for label in kept_terms(units, self.languages):
-            glossary.terms.pop(label, None)
-            if label not in glossary.keep:
-                glossary.keep.append(label)
-        glossary = glossary.merged(self.user_glossary)
+        # Names of screens and fields, set in italics, shown on screens or
+        # quoted by instructions, and abbreviations used as they are ("N/A").
+        glossary = glossary.merged(kept_terms(units, self.languages)).merged(self.user_glossary)
         self._brief = self._describe(units)
         for unit in units:
             self._sections.setdefault(unit.text, unit.section)
@@ -276,8 +272,11 @@ class LLMTranslator:
                     [translation, retry], key=lambda t: _severity(text, t, glossary)
                 )
                 # Retried without knowing what was wrong, a model can drop the
-                # same code again ("RJ45"): a last try names it.
-                if missing := missing_tokens(text, translation):
+                # same code again ("RJ45") or translate the same name ("Network
+                # Setup" starting a sentence): a last try names them.
+                kept = set(glossary.kept())
+                names = [t for t in glossary.violations(text, translation) if t in kept]
+                if missing := missing_tokens(text, translation) + names:
                     last = self._translate_one(text, previous, glossary, missing)
                     translation = min(
                         [translation, last], key=lambda t: _severity(text, t, glossary)

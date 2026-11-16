@@ -50,5 +50,5 @@ def test_segments_outside_the_words_keep_the_unit_whole():
 
 def test_na_is_kept_when_the_document_uses_it():
     units = [Unit("N/A"), Unit("Not used (required)")]
-    assert "N/A" in kept_terms(units)
-    assert "N/A" not in kept_terms([Unit("Nothing here")])
+    assert "N/A" in kept_terms(units).keep
+    assert "N/A" not in kept_terms([Unit("Nothing here")]).keep

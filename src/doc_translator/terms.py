@@ -9,6 +9,7 @@ import re
 from collections import Counter
 
 from .languages import EN_PT_BR
+from .translators.base import QUOTES, Glossary
 
 WORD = re.compile(r"[A-Za-z][\w®/\-]*")
 MIN_PROSE_WORDS = 8  # paragraphs shorter than this are headings, labels...
@@ -77,17 +78,67 @@ def interface_labels(units) -> list[str]:
     return labels
 
 
-def kept_terms(units, languages=EN_PT_BR) -> list[str]:
+def kept_terms(units, languages=EN_PT_BR) -> Glossary:
     """What both engines keep as written in this document: its interface
-    labels, the names its screens show, and the abbreviations of the
-    language pair it uses."""
+    labels, the names its screens show, the names its instructions quote,
+    and the abbreviations of the language pair it uses."""
     text = "\n".join(u.text for u in units)
     abbreviations = [a for a in sorted(languages.kept_abbreviations) if re.search(rf"(?<!\w){re.escape(a)}(?!\w)", text)]
     labels = interface_labels(units)
     names = [n for n in dict.fromkeys(n for u in units for n in u.names) if n not in labels]
-    # As for labels: "Main Menu" is a name, but "the main menu" is ordinary text.
-    names = [n for n in names if _written_as_name(n, text)]
-    return labels + names + abbreviations
+    # As for labels: "Main Menu" is a name, but "the main menu" is ordinary
+    # text. A name also written as text is kept only with its capitals, and
+    # only if it has two words or more: one capitalized word also starts
+    # sentences ("Exit the menu").
+    always = [n for n in names if _written_as_name(n, text)]
+    exact = [n for n in names if n not in always and len(n.split()) >= 2 and n in text]
+    kept = {k.lower() for k in labels + always + exact}
+    quoted = [q for q in quoted_names(units) if q.lower() not in kept]
+    return Glossary(keep=labels + always + abbreviations, exact=exact, quoted=quoted)
+
+
+# A quoted phrase an instruction points at is a name on screen: "select
+# ‘View configuration’", "at the “login” prompt", "the ‘Control’ tab",
+# "will display “226 Transfer complete”".
+QUOTE = re.compile(rf"(?<!\w)[{QUOTES}]([^{QUOTES}]{{1,60}})[{QUOTES}](?!\w)")
+QUOTE_JOINER = re.compile(r"\s*(?:,|and|or|/)\s*$")
+POINTED_BEFORE = re.compile(
+    r"\b(?:enter|type|select|click|press|choose|using|displays?|displayed|default|at the)\s*$", re.IGNORECASE
+)
+POINTED_AFTER = re.compile(
+    r"^\s*(?:prompts?|(?:when\s+)?prompted|tabs?|buttons?|keys?|menus?|commands?|fields?|options?|header|"
+    r"window|screen|dialog|mode|position|item)\b",
+    re.IGNORECASE,
+)
+MAX_QUOTED_WORDS = 5
+
+
+def quoted_names(units) -> list[str]:
+    """Quoted names an instruction points at, by a verb before them or the
+    kind of thing after them; they stay as the reader finds them on screen.
+    A quoted word that is just a word ("the “subnet mask” of the network",
+    "a “crossover” cable") is translated."""
+    names = []
+    for unit in units:
+        matches = list(QUOTE.finditer(unit.text))
+        # Quotes joined by "and", "or" or commas share their context: Enter
+        # “customer” for both “User” and “Password” prompts.
+        groups: list[list[re.Match]] = []
+        for match in matches:
+            if groups and QUOTE_JOINER.match(unit.text[groups[-1][-1].end() : match.start()]):
+                groups[-1].append(match)
+            else:
+                groups.append([match])
+        for group in groups:
+            before = unit.text[: group[0].start()]
+            after = unit.text[group[-1].end() :]
+            if not (POINTED_BEFORE.search(before) or POINTED_AFTER.match(after)):
+                continue
+            for match in group:
+                name = match.group(1).strip()
+                if 1 <= len(name.split()) <= MAX_QUOTED_WORDS and "(" not in name and any(c.isalpha() for c in name):
+                    names.append(name)
+    return list(dict.fromkeys(names))
 
 
 # Names shown by a screen: "<1> Network Setup", "(2) Hostname [fc-default]",
