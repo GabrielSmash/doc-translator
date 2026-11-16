@@ -141,8 +141,11 @@ def test_lines_ended_by_hand_are_not_joined():
             {},
         ),
     )
-    texts = [b.text for b in analyze_page(page)]
-    assert "<1> Network Setup" in texts and "**** Main Menu ****" in texts
+    blocks = analyze_page(page)
+    texts = [b.text for b in blocks]
+    # The menu is a screen: kept as typed, apart from the prose.
+    screen = next(b for b in blocks if b.text.startswith("**** Main Menu ****"))
+    assert screen.kind == Kind.CODE and screen.action == Action.KEEP
     assert "Choose one of the menu choices with the letter or number on the left and press Enter." in texts
     assert "7700 MultiFrame Manual" in texts
 
@@ -186,3 +189,59 @@ def test_cells_are_grouped_into_tables_as_text():
     found = tables(blocks)
     assert len(found) == 1
     assert table_text(found[0]) == "Pin | Name | Function\n1 | Tx | Transmit data\n2 | Rx | Receive data"
+
+
+def test_screens_are_kept_whatever_their_font():
+    # The 7700FC manual sets some screens in Times, not in a monospaced font.
+    page = page_with(
+        ("For example:", (72, 60), {}),
+        ("Kernel Build Date   : Jul 17 2002 09:52:05", (90, 80), {"fontname": "Times-Bold", "fontsize": 9}),
+        ("Software            : v2.01 Build 3", (90, 90), {"fontname": "Times-Bold", "fontsize": 9}),
+        ("Wed Feb 21 16:44:00 PST 2001", (90, 100), {"fontname": "Times-Bold", "fontsize": 9}),
+        # The screen goes on in blocks of their own.
+        ("NetBSD/evertz (fc-default) (tty00)", (90, 125), {"fontname": "Times-Bold", "fontsize": 9}),
+        ("login:", (90, 145), {"fontname": "Times-Bold", "fontsize": 9}),
+        ("If the prompt does not appear, check the cable and the port.", (72, 200), {}),
+    )
+    blocks = analyze_page(page)
+    kept = " ".join(b.text for b in blocks if b.action == Action.KEEP)
+    translated = [b.text for b in blocks if b.action == Action.TRANSLATE]
+    assert "Wed Feb 21" in kept and "NetBSD/evertz" in kept and "login:" in kept
+    assert translated == ["For example:", "If the prompt does not appear, check the cable and the port."]
+
+
+def test_prose_with_numbered_items_is_not_a_screen():
+    page = page_with(
+        ("(1) Enter the amount from line 3 of the worksheet.", (72, 72), {}),
+        ("(2) Add the amounts and enter the result here.", (72, 84), {}),
+        ("Features:", (72, 110), {}),
+    )
+    assert all(b.action == Action.TRANSLATE for b in analyze_page(page))
+
+
+def test_a_paragraph_cut_by_a_page_break_is_translated_whole():
+    from doc_translator.analysis.continued import share
+    from doc_translator.pipeline import translate_document
+    from doc_translator.translators.base import UnitTranslation
+
+    doc = pymupdf.open()
+    first = doc.new_page()
+    first.insert_text((72, 700), "Connect the network by plugging one end of the", fontsize=11)
+    first.insert_text((300, 780), "Page 4", fontsize=8)
+    second = doc.new_page()
+    second.insert_text((300, 40), "Manual", fontsize=8)
+    second.insert_text((72, 72), "cable into the receptacle of the card.", fontsize=11)
+
+    class Records:
+        def translate_units(self, units):
+            self.texts = [u.text for u in units]
+            return [UnitTranslation(u.text.upper(), list(u.segments)) for u in units]
+
+    engine = Records()
+    result = translate_document(pymupdf.open("pdf", doc.tobytes()), engine)
+    whole = "Connect the network by plugging one end of the cable into the receptacle of the card."
+    assert whole in engine.texts
+    # One translation per piece, cut at a space.
+    pieces = {u.text: t.text for u, t in zip(result.units, result.translations)}
+    assert " ".join([pieces["Connect the network by plugging one end of the"], pieces["cable into the receptacle of the card."]]) == whole.upper()
+    assert share("aaaa bbbb cccc dddd", [9, 9]) == ["aaaa bbbb", "cccc dddd"]

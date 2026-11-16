@@ -79,10 +79,44 @@ def interface_labels(units) -> list[str]:
 
 def kept_terms(units, languages=EN_PT_BR) -> list[str]:
     """What both engines keep as written in this document: its interface
-    labels, and the abbreviations of the language pair it uses."""
+    labels, the names its screens show, and the abbreviations of the
+    language pair it uses."""
     text = "\n".join(u.text for u in units)
     abbreviations = [a for a in sorted(languages.kept_abbreviations) if re.search(rf"(?<!\w){re.escape(a)}(?!\w)", text)]
-    return interface_labels(units) + abbreviations
+    labels = interface_labels(units)
+    names = [n for n in dict.fromkeys(n for u in units for n in u.names) if n not in labels]
+    # As for labels: "Main Menu" is a name, but "the main menu" is ordinary text.
+    names = [n for n in names if _written_as_name(n, text)]
+    return labels + names + abbreviations
+
+
+# Names shown by a screen: "<1> Network Setup", "(2) Hostname [fc-default]",
+# "**** SNMP Setup ****".
+SCREEN_NAME = [
+    re.compile(r"^<\w{1,3}>\s+(.+?)(?:\s{2,}.*|\s*\[.*)?$"),
+    re.compile(r"^\(\d{1,2}\)\s+(.+?)\s*\[.*$"),
+    re.compile(r"^([*=#~-])\1{2,}\s*(?P<banner>.+?)\s*([*=#~-])\3{2,}$"),
+]
+
+
+def screen_names(lines: list[str]) -> list[str]:
+    """Menu items and screen titles of the screens a document reproduces:
+    the reader finds them as written on the device, so they stay as written."""
+    names = []
+    for line in lines:
+        for pattern in SCREEN_NAME:
+            if match := pattern.match(line.strip()):
+                name = match.groupdict().get("banner") or match.group(1)
+                name = name.strip(" .:")
+                if len(name) > 2 and any(c.isalpha() for c in name):
+                    names.append(name)
+                break
+    return list(dict.fromkeys(names))
+
+
+def _written_as_name(name: str, text: str) -> bool:
+    found = re.findall(rf"(?<!\w){re.escape(name)}(?!\w)", text, re.IGNORECASE)
+    return bool(found) and all(f == name for f in found)
 
 
 QUOTED = re.compile(r"[\"“”‘’'`]([^\"“”‘’'`]{2,60})[\"“”‘’'`]")

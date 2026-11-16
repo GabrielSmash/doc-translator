@@ -23,7 +23,7 @@ from ..languages import EN_PT_BR, LanguagePair
 from ..terms import kept_terms, quoted_terms, recurring_terms
 from .base import Glossary, Unit, UnitTranslation
 from .cache import glossary_id
-from .checks import NUMBER, lost_numbers
+from .checks import NUMBER, token_problems
 
 log = logging.getLogger(__name__)
 
@@ -266,7 +266,7 @@ class LLMTranslator:
         results = []
         for index, (text, translation) in enumerate(zip(texts, translations)):
             translation = self._match_case(text, _clean(translation, text))
-            if _problems(text, translation, glossary):
+            if _problems(text, translation, glossary) or _shifted(index, texts, translations):
                 # Context for a lone retry: whatever preceded it in the batch.
                 previous = (context + texts[:index])[-CONTEXT_UNITS:]
                 retry = self._translate_one(text, previous, glossary)
@@ -416,6 +416,33 @@ def _batches(texts: list[str], group=lambda text: "") -> list[list[str]]:
     return batches
 
 
+# An answer this similar to another item of the batch (its source or its
+# answer) belongs to that item: the model shifted the answers.
+SHIFTED_SIMILARITY = 0.8
+SHIFTED_MARGIN = 0.2
+
+
+def _shifted(index: int, texts: list[str], translations: list[str]) -> bool:
+    """Is the answer at `index` another item's text? ("The two criteria
+    are:" came back as the next item, in English.) Only when the answer is
+    clearly closer to the other item than to its own: neighboring cells
+    ("Green/White or White", "Green/White or Green") look alike."""
+    from difflib import SequenceMatcher
+
+    def similarity(a: str, b: str) -> float:
+        return SequenceMatcher(None, a.strip().lower(), b.strip().lower()).ratio()
+
+    answer = translations[index]
+    if not answer.strip():
+        return False
+    own = similarity(answer, texts[index])
+    return any(
+        (other := similarity(answer, text)) >= SHIFTED_SIMILARITY and other > own + SHIFTED_MARGIN
+        for position, text in enumerate(texts)
+        if position != index
+    )
+
+
 def _clean(answer: str, source: str) -> str:
     """Strip the wrappers small models sometimes add around the answer."""
     text = answer.strip()
@@ -463,10 +490,11 @@ def _check(source: str, translation: str, glossary: Glossary | None) -> tuple[in
         return 4, "empty or unexpected length"
     if _untranslated(source, translation):
         return 3, "left untranslated"
-    # Small models sometimes alter numbers ("RS-232" -> "RS-230"): in a
-    # technical document that is worse than an awkward sentence.
-    if missing := lost_numbers(source, translation):
-        return 2, "numbers changed: " + ", ".join(sorted(missing))
+    # Small models sometimes alter numbers ("RS-232" -> "RS-230") or signs
+    # ("100Ω" -> "100<tool_call>"): in a technical document that is worse
+    # than an awkward sentence.
+    if problems := token_problems(source, translation):
+        return 2, "; ".join(problems)
     if glossary and (terms := glossary.violations(source, translation)):
         return 1, "terminology not followed: " + ", ".join(terms)
     return 0, ""

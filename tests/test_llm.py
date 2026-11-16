@@ -300,3 +300,21 @@ def test_a_table_goes_in_one_batch_and_later_batches_follow_earlier_ones():
     llm._cache = {"White": "Branco"}
     llm._translate_all(["White", "Green"], Glossary(), with_context=True)
     assert "White => Branco" in llm.prompts[0][1]["content"]
+
+
+def test_an_answer_shifted_to_another_item_is_detected():
+    from doc_translator.translators.llm import _shifted
+
+    texts = ["The two criteria are:", "7700FC Image is “fc_release-2-19-b1” or greater."]
+    shifted = ['7700FC Image is "fc_release-2-19-b1" or greater', "A imagem do 7700FC é fc_release-2-19-b1 ou superior."]
+    assert _shifted(0, texts, shifted)
+    good = ["Os dois critérios são:", "A imagem do 7700FC é fc_release-2-19-b1 ou superior."]
+    assert not _shifted(0, texts, good) and not _shifted(1, texts, good)
+
+
+def test_alike_cells_are_not_taken_for_shifted_answers():
+    from doc_translator.translators.llm import _shifted
+
+    texts = ["Green/White or White", "Green/White or Green", "Blue"]
+    answers = ["Verde/Branco ou Branco", "Verde/Branco ou Verde", "Blue"]
+    assert not any(_shifted(i, texts, answers) for i in range(3))

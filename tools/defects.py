@@ -23,6 +23,14 @@ Checks, and the stage they watch:
 - inconsistent_words (translation): a word of short texts (cells, labels)
   kept in English in some translations and translated in others ("White"
   in "White/Orange" kept, in "White/Green" translated).
+- changed_tokens (translation): a translation whose numbers, value signs
+  ("Ω", "°") or model control tokens ("<tool_call>") differ from its
+  source after the engine's retries and the repairs.
+- restarted_sentences (analysis): a piece of a paragraph that goes on from
+  another block (after a page break: "cable into the RJ-45...") translated
+  as a sentence of its own, starting with a capital.
+- translated_names (translation): a name the document keeps as written
+  (a screen's menu item, an interface label, "N/A") translated anyway.
 - changed_form (translation): a short text (a cell, a label) whose
   translation lost a sign standing apart ("Transmit –"), gained a final
   period, or changed the case of its first letter ("no" -> "Não.").
@@ -50,6 +58,9 @@ CHECKS = (
     "grown_cells",
     "headings_in_cells",
     "changed_form",
+    "changed_tokens",
+    "translated_names",
+    "restarted_sentences",
     "mixed_sizes",
     "inconsistent_words",
 )
@@ -91,6 +102,9 @@ def find(original: pymupdf.Document, output: pymupdf.Document, result) -> list[F
         ]
     findings += _misplaced_leaders(output, result)
     findings += _changed_form(result)
+    findings += _changed_tokens(result)
+    findings += _translated_names(result)
+    findings += _restarted_sentences(result)
     findings += _inconsistent_words(result)
     return findings
 
@@ -364,6 +378,48 @@ def _changed_form(result) -> list[Finding]:
         if problems:
             page = page_of.get(id(translated.source), -1) + 1
             found.append(Finding("changed_form", page, f"{source} -> {text}", ", ".join(problems)))
+    return found
+
+
+def _changed_tokens(result) -> list[Finding]:
+    from doc_translator.translators.checks import token_problems
+
+    page_of = {id(b): index for index, blocks in enumerate(result.pages) for b in blocks}
+    found = []
+    for translated, unit, translation in zip(result.translated, result.units, result.translations):
+        if problems := token_problems(unit.text, translation.text):
+            page = page_of.get(id(translated.source), -1) + 1
+            found.append(Finding("changed_tokens", page, unit.text, "; ".join(problems)))
+    return found
+
+
+def _translated_names(result) -> list[Finding]:
+    import re
+
+    from doc_translator.terms import kept_terms
+
+    names = kept_terms(result.units)
+    page_of = {id(b): index for index, blocks in enumerate(result.pages) for b in blocks}
+    found = []
+    for translated, unit, translation in zip(result.translated, result.units, result.translations):
+        for name in names:
+            mentioned = re.search(rf"(?<!\w){re.escape(name)}(?!\w)", unit.text)
+            if mentioned and name.lower() not in translation.text.lower():
+                page = page_of.get(id(translated.source), -1) + 1
+                found.append(Finding("translated_names", page, unit.text, f"{name!r} -> {translation.text[:60]!r}"))
+    return found
+
+
+def _restarted_sentences(result) -> list[Finding]:
+    page_of = {id(b): index for index, blocks in enumerate(result.pages) for b in blocks}
+    found = []
+    for translated, unit, translation in zip(result.translated, result.units, result.translations):
+        source, text = unit.text.strip(), translation.text.strip()
+        if translated.source.kind != Kind.PARAGRAPH or not source[:1].islower() or len(source.split()) < 3:
+            continue
+        if text[:1].isupper() and text[:1] != source[:1]:
+            page = page_of.get(id(translated.source), -1) + 1
+            found.append(Finding("restarted_sentences", page, source, f"-> {text[:50]!r}"))
     return found
 
 

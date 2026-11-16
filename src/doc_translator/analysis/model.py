@@ -68,9 +68,20 @@ class Line:
         return "".join(s.text for s in self.spans)
 
     @property
+    def visible_spans(self) -> list["Span"]:
+        """Spans with ink: a space set in another size (a 13 pt space in an
+        11 pt line) says nothing about the line's size or position."""
+        return [s for s in self.spans if s.text.strip()] or self.spans
+
+    @property
+    def size(self) -> float:
+        """The size of the line's largest letters."""
+        return max(s.size for s in self.visible_spans)
+
+    @property
     def baseline(self) -> float:
         # The largest span sets the baseline; superscripts sit above it.
-        return max(self.spans, key=lambda s: s.size).baseline
+        return max(self.visible_spans, key=lambda s: s.size).baseline
 
     @property
     def horizontal(self) -> bool:

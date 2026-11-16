@@ -1,6 +1,7 @@
 """End-to-end flow: read and analyze -> translate -> align -> layout -> draw."""
 
 import logging
+import re
 import time
 from collections import Counter, defaultdict
 from contextlib import contextmanager
@@ -11,12 +12,15 @@ import pymupdf
 
 from .align import base_style, paragraph_runs, realign, styled_segments
 from .analysis import Action, Block, Kind, analyze_page
+from .analysis.continued import continued, share
 from .analysis.tables import table_text, tables
 from .fonts import FontLibrary
 from .layout import Placement, TranslatedParagraph, layout_page
 from .pdf.draw import draw_page
 from .pdf.read import graphic_areas
+from .terms import screen_names
 from .translators import Translator, Unit, UnitTranslation
+from .translators.checks import repair_tokens, token_problems
 from .translators.form import restore_form, strip_affixes
 
 log = logging.getLogger(__name__)
@@ -120,20 +124,41 @@ def _translate_document(doc: pymupdf.Document, translator: Translator, result: R
         if (text := table_text(cells))
         for cell in cells
     }
+    # Names the document's screens show: kept as the device writes them.
+    names = screen_names(
+        [line.text for blocks in result.pages for b in blocks if b.kind == Kind.CODE for line in b.lines]
+    )
     for paragraph, base, segments in prepared:
         if paragraph.kind == Kind.HEADING:
             section = paragraph.text
         labels = [s.text.strip() for s in segments if s.style.italic and not base.italic]
         result.units.append(
-            Unit(paragraph.text, [s.text.strip() for s in segments], section, labels, table_of.get(id(paragraph), ""))
+            Unit(
+                paragraph.text,
+                [s.text.strip() for s in segments],
+                section,
+                labels,
+                names=[n for n in names if re.search(rf"(?<!\w){re.escape(n)}(?!\w)", paragraph.text)],
+                table=table_of.get(id(paragraph), ""),
+            )
         )
     with result.timed("translate"):
-        stripped = [strip_affixes(unit) for unit in result.units]
+        # A paragraph cut by a page break is translated whole, then shared
+        # back between its pieces.
+        groups = _groups(len(paragraphs), continued(paragraphs))
+        whole = [_joined([result.units[i] for i in group]) for group in groups]
+        stripped = [strip_affixes(unit) for unit in whole]
         translations = translator.translate_units([unit for unit, _, _ in stripped])
-        result.translations = [
-            restore_form(unit.text, translation, lead, trail)
-            for (unit, lead, trail), translation in zip(stripped, translations)
+        translations = [
+            _repaired(unit, restore_form(unit.text, translation, lead, trail))
+            for (unit, lead, trail), translation, unit in zip(stripped, translations, whole)
         ]
+        by_index = {
+            index: piece
+            for group, translation in zip(groups, translations)
+            for index, piece in zip(group, _shared(translation, [result.units[i] for i in group]))
+        }
+        result.translations = [by_index[i] for i in range(len(result.units))]
 
     with result.timed("realign"):
         for (paragraph, base, segments), translation in zip(prepared, result.translations):
@@ -166,6 +191,51 @@ def _translate_document(doc: pymupdf.Document, translator: Translator, result: R
         for index in failed:
             doc.delete_page(index)
             doc.insert_pdf(original, from_page=index, to_page=index, start_at=index)
+
+
+def _groups(count: int, chains: list[list[int]]) -> list[list[int]]:
+    """Indices 0..count-1 in order, the pieces of each chain together."""
+    chain_of = {chain[0]: chain for chain in chains}
+    inside = {i for chain in chains for i in chain[1:]}
+    return [chain_of.get(i, [i]) for i in range(count) if i not in inside]
+
+
+def _joined(units: list[Unit]) -> Unit:
+    if len(units) == 1:
+        return units[0]
+    first = units[0]
+    return Unit(
+        " ".join(u.text for u in units),
+        [s for u in units for s in u.segments],
+        first.section,
+        [label for u in units for label in u.labels],
+        names=list(dict.fromkeys(n for u in units for n in u.names)),
+        table=first.table,
+    )
+
+
+def _shared(translation: UnitTranslation, units: list[Unit]) -> list[UnitTranslation]:
+    """The translation of a joined paragraph, back as one per piece."""
+    if len(units) == 1:
+        return [translation]
+    texts = share(translation.text, [len(u.text) for u in units])
+    pieces, start = [], 0
+    for unit, text in zip(units, texts):
+        count = len(unit.segments)
+        pieces.append(UnitTranslation(text, translation.segments[start : start + count]))
+        start += count
+    return pieces
+
+
+def _repaired(unit: Unit, translation: UnitTranslation) -> UnitTranslation:
+    """Numbers and signs the engine still changed after its retries, put
+    back; what can't be repaired is reported."""
+    text = repair_tokens(unit.text, translation.text)
+    segments = [repair_tokens(s, t) for s, t in zip(unit.segments, translation.segments)]
+    segments += translation.segments[len(segments) :]
+    if problems := token_problems(unit.text, text):
+        log.warning("Check translation of %r (%s): %r", unit.text[:50], "; ".join(problems), text[:80])
+    return UnitTranslation(text, segments)
 
 
 class _WarningCollector(logging.Handler):

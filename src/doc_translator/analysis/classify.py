@@ -36,6 +36,49 @@ def kept_kind(line: Line) -> Kind | None:
     return None
 
 
+# Lines of a terminal or menu screen copied into the text. Manuals set them
+# in a monospaced font, but not always (the 7700FC manual has screens in
+# Times Bold): their content tells them apart from prose.
+SCREEN_LINE = [
+    re.compile(r"^<\w{1,3}>\s+\S"),  # menu item: "<1> Network Setup"
+    re.compile(r"^\(\d{1,2}\)\s.*\[.*\]$"),  # item with its value: "(1) Use DHCP [N]"
+    re.compile(r"^([*=#~-])\1{2,}.*([*=#~-])\2{2,}$"),  # banner: "**** Main Menu ****"
+    re.compile(r"^(?:[a-z][\w/-]*\s*[:>#$]|[>#$])$"),  # prompt: "login:", ">"
+    re.compile(r"\S {3,}\S"),  # columns aligned with spaces
+    re.compile(r"\b\d{1,2}:\d{2}:\d{2}\b"),  # time stamp
+    re.compile(r":\s*\d{1,3}(?:\.\d{1,3}){3}$"),  # address listing: "Trap #1: 192.168.1.76"
+    re.compile(r"\s>\s*\S+$"),  # prompt and the answer typed: "Remove trap # > 2"
+]
+# A screen is at least this many lines, most of them screen-like.
+SCREEN_MIN_LINES = 2
+SCREEN_SHARE = 0.5
+
+
+def is_screen(lines: list[Line]) -> bool:
+    """Lines of one text block that reproduce a terminal or menu screen."""
+    texts = [line.text.strip() for line in lines if line.text.strip()]
+    if len(texts) < SCREEN_MIN_LINES:
+        return False
+    like = sum(any(p.search(text) for p in SCREEN_LINE) for text in texts)
+    return like >= SCREEN_SHARE * len(texts) and like >= SCREEN_MIN_LINES
+
+
+# A block this many line heights below a screen, in its style and margin,
+# is the rest of the screen.
+SCREEN_GAP = 3.0
+
+
+def continues_screen(lines: list[Line], screen: list[Line]) -> bool:
+    if not lines or not screen:
+        return False
+    last = screen[-1]
+    style = {(s.font, round(s.size, 1)) for line in screen for s in line.spans if s.text.strip()}
+    same_style = all((s.font, round(s.size, 1)) in style for line in lines for s in line.spans if s.text.strip())
+    same_margin = all(abs(line.bbox.x0 - last.bbox.x0) <= 2 for line in lines)
+    close = 0 <= lines[0].bbox.y0 - last.bbox.y1 <= SCREEN_GAP * last.bbox.height
+    return same_style and same_margin and close
+
+
 def kept_block(lines: list[Line], kind: Kind) -> Block:
     return Block(lines=lines, kind=kind, action=Action.KEEP)
 

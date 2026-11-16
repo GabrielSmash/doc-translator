@@ -134,7 +134,7 @@ def _continues(
     lines: list[Line],
 ) -> bool:
     """Is `line` the next line of the paragraph ending with `previous`?"""
-    size = max(s.size for s in previous.spans)
+    size = previous.size
     spacing = line.baseline - previous.baseline
     if not 0 < spacing <= MAX_LINE_SPACING * size:
         return False
@@ -142,7 +142,7 @@ def _continues(
         return False  # no horizontal overlap: another column
     # The largest letters: a footnote mark or superscript starting a line
     # is smaller than the text it belongs to.
-    if abs(size - max(s.size for s in line.spans)) > 0.5:
+    if abs(size - line.size) > 0.5:
         return False
     if _rule_between(previous, line, rules):
         return False  # e.g. the border between two table rows

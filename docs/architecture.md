@@ -227,6 +227,7 @@ Each phase leaves the tool working and has a number to move.
 | 5 ✅ | Defect 8; `LanguagePair`; PyPI | Styles carried over on the LLM engine match the fast engine |
 | 6 ✅ | Reading review: layout harmonized, translation context | Pages read as ordered; menus and screens keep their lines |
 | 7 ✅ | Defects by class: inspector, causes C1–C6 | Every class counted on the corpus; the reviewed defects at zero |
+| 8 | Translation fidelity by cause: T1–T6 | Every unit of the manual reviewed; each cause counted and fixed in order |
 
 Phase 0 comes first because every later phase is judged by it. Phase 1 comes
 before the restructuring because those defects corrupt content today and
@@ -365,6 +366,21 @@ has a fixture (`split_line`, `ruled_table`, `toc_leaders`) for CI.
 The same checks then found, on the IRS form, an item marker "(c)" appended
 to the previous item and lost, and dot leaders drawn one dot at a time that
 the translation ran over (25 overlaps → 0): both fixed the same way.
+
+### Phase 8: translation fidelity by cause
+
+A review of every translated unit of the manual (LLM engine) found 256
+problems in 219 units. They were grouped by cause, and the causes taken in
+order of harm: what changes a technical fact first.
+
+| Cause | Class (check) | Fix | Manual, LLM engine |
+|---|---|---|---|
+| T1. Changed numbers were detected only when lost, and only logged | `changed_tokens` | Added numbers, lost value signs (Ω) and model control tokens are problems too; what the retry leaves is repaired when unambiguous (`checks.repair_tokens`) | 6 → 0 (2 runs later: "RJ45" dropped, reported) |
+| T2. Screens recognized only by a monospaced font; screen names translated in one place and kept in another | `translated_names` | Screens recognized by their content (menu items, banners, prompts, time stamps, aligned columns), with their next blocks; the names a screen shows are kept like italic labels | 49 screen lines and names translated → 0 |
+| T3. One paragraph read as several: across a page break, or split by a space set in another size | `restarted_sentences` | Pieces of a paragraph are translated together and the translation shared back; sizes and baselines ignore blank spans; an answer that belongs to another item of the batch is retried | 4 → 0 |
+| T4. Short texts left in English are never re-checked | — | next | |
+| T5. Domain terms read in their everyday sense, decided again at each use | — | next | |
+| T6. Limits of the 4B model (gender, agreement, invented words) | — | model choice or a review pass | |
 
 ## 6. Open decisions
 
