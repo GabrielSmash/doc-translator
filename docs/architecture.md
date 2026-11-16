@@ -375,12 +375,12 @@ order of harm: what changes a technical fact first.
 
 | Cause | Class (check) | Fix | Manual, LLM engine |
 |---|---|---|---|
-| T1. Changed numbers were detected only when lost, and only logged | `changed_tokens` | Added numbers, lost value signs (Ω) and model control tokens are problems too; what the retry leaves is repaired when unambiguous (`checks.repair_tokens`) | 6 → 0 (2 runs later: "RJ45" dropped, reported) |
-| T2. Screens recognized only by a monospaced font; screen names translated in one place and kept in another | `translated_names` | Screens recognized by their content (menu items, banners, prompts, time stamps, aligned columns), with their next blocks; the names a screen shows are kept like italic labels | 49 screen lines and names translated → 0 |
-| T3. One paragraph read as several: across a page break, or split by a space set in another size | `restarted_sentences` | Pieces of a paragraph are translated together and the translation shared back; sizes and baselines ignore blank spans; an answer that belongs to another item of the batch is retried | 4 → 0 |
-| T4. Short texts left in English are never re-checked | — | next | |
-| T5. Domain terms read in their everyday sense, decided again at each use | — | next | |
-| T6. Limits of the 4B model (gender, agreement, invented words) | — | model choice or a review pass | |
+| T1 ([ADR 0002](adr/0002-numbers-and-signs-kept-as-written.md)). Changed numbers were detected only when lost, and only logged | `changed_tokens` | Added numbers, changed codes (RJ45), lost value signs (Ω) and model control tokens are problems too; a last try names what is missing; what the retry leaves is repaired when unambiguous (`checks.repair_tokens`) | 6 → 0 |
+| T2 ([ADR 0003](adr/0003-screens-recognized-by-content.md)). Screens recognized only by a monospaced font; screen names translated in one place and kept in another | `translated_names` | Screens recognized by their content (menu items, banners, prompts, time stamps, aligned columns), with their next blocks; the names a screen shows are kept like italic labels | 49 screen lines and names translated → 0 |
+| T3 ([ADR 0004](adr/0004-a-paragraph-is-translated-whole.md)). One paragraph read as several: across a page break, or split by a space set in another size | `restarted_sentences` | Pieces of a paragraph are translated together and the translation shared back; sizes and baselines ignore blank spans; an answer that belongs to another item of the batch is retried | 4 → 0 |
+| T4 ([ADR 0005](adr/0005-short-texts-left-in-english.md)). Short texts left in English are never re-checked | — | next | |
+| T5 ([ADR 0006](adr/0006-domain-terms-decided-once.md)). Domain terms read in their everyday sense, decided again at each use | — | next | |
+| T6 ([ADR 0007](adr/0007-limits-of-the-local-model.md)). Limits of the 4B model (gender, agreement, invented words) | — | model choice or a review pass | |
 
 ## 6. Open decisions
 

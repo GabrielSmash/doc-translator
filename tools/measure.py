@@ -81,7 +81,8 @@ class Pseudo:
 
     Each word is transformed on its own, so a styled phrase transforms to
     exactly the matching part of its paragraph. Terms the document keeps
-    as written (screen names, labels, "N/A") stay, as with the real engines.
+    as written (screen names, labels, "N/A") and codes ("RJ45") stay, as
+    with the real engines.
     """
 
     ACCENTS = str.maketrans("aeiouAEIOUcC", "áéíóúÁÉÍÓÚçÇ")
@@ -89,9 +90,10 @@ class Pseudo:
 
     def translate_units(self, units: list[Unit]) -> list[UnitTranslation]:
         from doc_translator.terms import kept_terms
+        from doc_translator.translators.checks import CODE
 
-        kept = kept_terms(units)
-        self._kept = re.compile("|".join(re.escape(t) for t in sorted(kept, key=len, reverse=True))) if kept else None
+        kept = [re.escape(t) for t in sorted(kept_terms(units), key=len, reverse=True)]
+        self._kept = re.compile("|".join([*kept, CODE.pattern]))
         return [UnitTranslation(self._text(u.text), [self._text(s) for s in u.segments]) for u in units]
 
     def _text(self, text: str) -> str:

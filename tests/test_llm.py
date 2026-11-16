@@ -318,3 +318,18 @@ def test_alike_cells_are_not_taken_for_shifted_answers():
     texts = ["Green/White or White", "Green/White or Green", "Blue"]
     answers = ["Verde/Branco ou Branco", "Verde/Branco ou Verde", "Blue"]
     assert not any(_shifted(i, texts, answers) for i in range(3))
+
+
+def test_a_code_dropped_twice_is_named_in_a_last_try():
+    llm = FakeLLM(
+        [
+            json.dumps({"translations": ["Tabela 1: Códigos de cores de fiação padrão"]}),
+            "Tabela 1: Códigos de cores de fiação padrão",
+            "Tabela 1: Códigos de cores de fiação RJ45 padrão",
+        ]
+    )
+    results = llm.translate_units([Unit("Table 1: Standard RJ45 Wiring Colour Codes")])
+    assert results[0].text == "Tabela 1: Códigos de cores de fiação RJ45 padrão"
+    assert "RJ45" in llm.prompts[1][0]["content"]  # codes listed in the first retry
+    assert "dropped or changed these" in llm.prompts[2][0]["content"]
+    assert "dropped" not in llm.prompts[1][0]["content"]

@@ -1,7 +1,11 @@
 """Numbers, value signs and model tokens: found and repaired the same way
 for every engine (cases from the Evertz 7700FC manual)."""
 
-from doc_translator.translators.checks import repair_tokens, token_problems
+from doc_translator.translators.checks import (
+    missing_tokens,
+    repair_tokens,
+    token_problems,
+)
 
 
 def test_an_altered_number_is_put_back():
@@ -62,3 +66,23 @@ def test_a_number_split_by_a_hyphen_is_joined_back():
 
 def test_vulgar_fractions_are_numbers():
     assert token_problems("When both LEDs ½ are enabled", "Quando ambos os LEDs 1/2 estão ativos") == []
+
+
+def test_a_changed_code_is_a_problem():
+    # A letter changed in a code is as wrong as a changed digit.
+    assert token_problems("Use the RJ45 jack.", "Use o conector RG45.") == ["codes changed: RJ45"]
+    assert token_problems("Image fc_release-2-19-b1 or later", "Imagem fc_release-2-19-b1 ou posterior") == []
+
+
+def test_spacing_of_a_code_may_change():
+    # pt-BR spaces units; the document writes "RJ-45" and "RJ45".
+    assert token_problems("a 3V battery, 2.5mm wide", "uma bateria de 3 V, 2,5 mm de largura") == []
+    assert token_problems("the RJ45 jack", "o conector RJ-45") == []
+    assert token_problems("the 1st slot", "o 1º slot") == []
+    assert token_problems("wait up to10 minutes", "aguarde até 10 minutos") == []
+
+
+def test_missing_tokens_name_the_code_not_its_digits():
+    source = "Table 1: Standard RJ45 Wiring Colour Codes"
+    assert missing_tokens(source, "Tabela 1: Códigos de cores de fiação padrão") == ["RJ45"]
+    assert missing_tokens("pins 2 and 3", "pino 2") == ["3"]

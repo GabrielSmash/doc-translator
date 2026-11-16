@@ -12,6 +12,8 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 
+from ..languages import EN_PT_BR
+
 NUMBER = re.compile(r"\d+(?:[.,/:]\d+)*")
 # Signs that carry a value (units, legal marks): a translation keeps them.
 SYMBOLS = frozenset("Ω®™©°µ±×≤≥≈∞")
@@ -20,6 +22,16 @@ MODEL_TOKEN = re.compile(r"<\|[^<>|]*\|>|</?(?:tool_call|tool_response|think)>")
 # A number written right before a sign ("100Ω", "25 °"), so the sign can be
 # put back after the same number.
 NUMBER_SYMBOL = re.compile(r"(\d+(?:[.,]\d+)*)\s?([" + "".join(SYMBOLS) + "])")
+# A code: letters and digits in one word, maybe joined by "_-." ("RJ45",
+# "CR2032", "fc_release-2-19-b1", "802.3u"). It has no translation; a
+# changed letter ("RG45") is as wrong as a changed digit. Not "/": it joins
+# words in formulas ("pos/10000/dmodel") and alternatives ("RS-232/RS-422").
+CODE = re.compile(
+    r"(?<![\w.\-])(?=[\w.\-]*[A-Za-z])(?=[\w.\-]*\d)[A-Za-z0-9]+(?:[_\-.][A-Za-z0-9]+)*"
+)
+ORDINAL = re.compile(r"\d+(?:st|nd|rd|th)", re.IGNORECASE)
+# A word typed against a number ("up to10 minutes") is a typo, not a code.
+GLUED = re.compile(r"([a-z]+)\d+|\d+([a-z]+)")
 
 
 def _digits(number: str) -> str:
@@ -47,6 +59,38 @@ def lost_symbols(source: str, translation: str) -> set[str]:
     return {c for c in source if c in SYMBOLS} - set(translation)
 
 
+def codes(text: str, stopwords: frozenset[str] = EN_PT_BR.source_stopwords) -> list[str]:
+    return [c for c in CODE.findall(text) if not ORDINAL.fullmatch(c) and not _glued(c, stopwords)]
+
+
+def _glued(code: str, stopwords: frozenset[str]) -> bool:
+    match = GLUED.fullmatch(code)
+    return bool(match) and (match.group(1) or match.group(2)) in stopwords
+
+
+def _plain(text: str) -> str:
+    """Without the spacing a translation may change: "3V" is "3 V" in pt-BR,
+    "RJ-45" is "RJ45", "2.5mm" is "2,5 mm"."""
+    return re.sub(r"[\s\-]", "", text).replace(",", ".").lower()
+
+
+def lost_codes(source: str, translation: str) -> list[str]:
+    """Codes of `source` not found, as written, in `translation`."""
+    plain = _plain(unicodedata.normalize("NFKC", translation))
+    return [c for c in dict.fromkeys(codes(source)) if _plain(c) not in plain]
+
+
+def missing_tokens(source: str, translation: str) -> list[str]:
+    """What the translation dropped or changed, as the source writes it, to
+    name it to the engine: the codes, then numbers that are not part of a
+    lost code ("45" of "RJ45")."""
+    lost = lost_codes(source, translation)
+    digits = lost_numbers(source, translation)
+    in_codes = {_digits(n) for c in lost for n in NUMBER.findall(c)}
+    numbers = [n for n in dict.fromkeys(NUMBER.findall(source)) if _digits(n) in digits - in_codes]
+    return lost + numbers
+
+
 def model_tokens(source: str, translation: str) -> list[str]:
     return [t for t in MODEL_TOKEN.findall(translation) if t not in source]
 
@@ -56,6 +100,8 @@ def token_problems(source: str, translation: str) -> list[str]:
     problems = []
     if lost := lost_numbers(source, translation):
         problems.append("numbers changed: " + ", ".join(sorted(lost)))
+    if lost := lost_codes(source, translation):
+        problems.append("codes changed: " + ", ".join(lost))
     if added := added_numbers(source, translation):
         problems.append("numbers added: " + ", ".join(sorted(added)))
     if lost := lost_symbols(source, translation):

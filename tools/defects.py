@@ -23,9 +23,10 @@ Checks, and the stage they watch:
 - inconsistent_words (translation): a word of short texts (cells, labels)
   kept in English in some translations and translated in others ("White"
   in "White/Orange" kept, in "White/Green" translated).
-- changed_tokens (translation): a translation whose numbers, value signs
-  ("Ω", "°") or model control tokens ("<tool_call>") differ from its
-  source after the engine's retries and the repairs.
+- changed_tokens (translation): a translation whose numbers, codes
+  ("RJ45", "CR2032"), value signs ("Ω", "°") or model control tokens
+  ("<tool_call>") differ from its source after the engine's retries and
+  the repairs.
 - restarted_sentences (analysis): a piece of a paragraph that goes on from
   another block (after a page break: "cable into the RJ-45...") translated
   as a sentence of its own, starting with a capital.

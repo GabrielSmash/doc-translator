@@ -23,7 +23,7 @@ from ..languages import EN_PT_BR, LanguagePair
 from ..terms import kept_terms, quoted_terms, recurring_terms
 from .base import Glossary, Unit, UnitTranslation
 from .cache import glossary_id
-from .checks import NUMBER, token_problems
+from .checks import NUMBER, codes, missing_tokens, token_problems
 
 log = logging.getLogger(__name__)
 
@@ -275,20 +275,34 @@ class LLMTranslator:
                 translation = min(
                     [translation, retry], key=lambda t: _severity(text, t, glossary)
                 )
+                # Retried without knowing what was wrong, a model can drop the
+                # same code again ("RJ45"): a last try names it.
+                if missing := missing_tokens(text, translation):
+                    last = self._translate_one(text, previous, glossary, missing)
+                    translation = min(
+                        [translation, last], key=lambda t: _severity(text, t, glossary)
+                    )
                 if problems := _problems(text, translation, glossary):
                     log.warning("Check translation of %r (%s): %r", text[:50], problems, translation[:80])
             results.append(translation or text)
         return results
 
-    def _translate_one(self, text: str, context: list[str], glossary: Glossary) -> str:
+    def _translate_one(
+        self, text: str, context: list[str], glossary: Glossary, missing: list[str] | None = None
+    ) -> str:
         prompt = self._prompt(f"Translate this text:\n{text}", [text], context, glossary)
         if terms := glossary.relevant(text, self.languages.source):
             prompt[0]["content"] += "\n- Mandatory terminology:\n" + terms
-        if numbers := NUMBER.findall(text):
+        if kept := codes(text) + NUMBER.findall(text):
             # In the system message: put next to the text, small models
             # translate the reminder along with it.
-            prompt[0]["content"] += "\n- The translation must contain these numbers unchanged: " + ", ".join(
-                dict.fromkeys(numbers)
+            prompt[0]["content"] += "\n- The translation must contain these codes and numbers unchanged: " + ", ".join(
+                dict.fromkeys(kept)
+            )
+        if missing:
+            prompt[0]["content"] += (
+                "\n- A previous translation dropped or changed these; write each exactly as given: "
+                + ", ".join(missing)
             )
         translation = _clean(self._chat(prompt, max_tokens=64 + len(text)), text)
         return self._match_case(text, translation)

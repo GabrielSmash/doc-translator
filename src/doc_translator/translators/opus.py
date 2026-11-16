@@ -19,7 +19,7 @@ from .base import (
     translate_independently,
 )
 from .cache import glossary_id
-from .checks import NUMBER, lost_numbers
+from .checks import CODE, NUMBER, lost_codes, lost_numbers
 
 log = logging.getLogger(__name__)
 
@@ -105,16 +105,17 @@ class OpusTranslator:
         protected = [protect(s, self._unknown_words(s), self.glossary) for s in prepared]
         decoded = self._run(protected)
 
-        # Opus-MT sometimes drops or alters a number. It is deterministic, so
-        # a plain retry repeats the error; it does copy placeholders, so the
-        # sentence is translated again with every number protected. Only
-        # those sentences: placeholders everywhere would cost fluency.
-        retry = [i for i, (s, t) in enumerate(zip(prepared, decoded)) if lost_numbers(s, t)]
+        # Opus-MT sometimes drops or alters a number or a code. It is
+        # deterministic, so a plain retry repeats the error; it does copy
+        # placeholders, so the sentence is translated again with every number
+        # and code protected. Only those sentences: placeholders everywhere
+        # would cost fluency.
+        retry = [i for i, (s, t) in enumerate(zip(prepared, decoded)) if _lost(s, t)]
         if retry:
             reprotected = [protect(prepared[i], self._protect_numbers(prepared[i]), self.glossary) for i in retry]
             for i, text in zip(retry, self._run(reprotected)):
-                if lost_numbers(prepared[i], text):
-                    log.warning("Numbers changed in %r: %r", prepared[i][:50], text[:60])
+                if _lost(prepared[i], text):
+                    log.warning("Numbers or codes changed in %r: %r", prepared[i][:50], text[:60])
                 else:
                     decoded[i] = text
 
@@ -143,9 +144,9 @@ class OpusTranslator:
         ]
 
     def _protect_numbers(self, text: str) -> re.Pattern:
-        """Numbers plus the words _unknown_words() protects."""
+        """Codes and numbers, plus the words _unknown_words() protects."""
         unknown = self._unknown_words(text)
-        return re.compile(NUMBER.pattern + (f"|{unknown.pattern}" if unknown else ""))
+        return re.compile(f"{CODE.pattern}|{NUMBER.pattern}" + (f"|{unknown.pattern}" if unknown else ""))
 
     def _unknown_words(self, text: str) -> re.Pattern | None:
         """Words holding characters the model can't read ("VistaLINK®", "<Enter>").
@@ -184,3 +185,7 @@ def _preload_cuda_libraries() -> None:
     for name in ("libcublasLt.so.12", "libcublas.so.12"):
         if (lib_dir / name).exists():
             ctypes.CDLL(str(lib_dir / name), mode=ctypes.RTLD_GLOBAL)
+
+
+def _lost(source: str, translation: str) -> bool:
+    return bool(lost_numbers(source, translation) or lost_codes(source, translation))
