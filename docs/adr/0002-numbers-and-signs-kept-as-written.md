@@ -37,7 +37,9 @@ seen at all.
      not (`RJ45` → `RG45` is caught). Not codes: ordinals (`1st`), a common
      word typed against a number (`up to10`), and words joined by `/`, which
      in formulas and alternatives join ordinary words;
-   - value signs lost (`Ω ® ™ © ° µ ± × ≤ ≥ ≈ ∞`);
+   - value signs lost (`Ω ® ™ © ° µ ± × ≤ ≥ ≈ ∞`). The OHM SIGN (U+2126)
+     and the MICRO SIGN (U+00B5) are the same signs as the Greek letters a
+     translation writes (U+03A9, U+03BC);
    - control tokens of the chat model.
 2. **The LLM engine retries** an item with such a problem (severity 2 in
    `_check`). The retry lists the item's codes and numbers in the system
@@ -57,7 +59,9 @@ seen at all.
    - a number of the translation is replaced only when the source doesn't
      have it **and** the source's number in its place is missing from the
      translation; a reordered sentence is left alone;
-   - a lost sign is written again after its number.
+   - a lost sign is written again after the same occurrence of its number
+     (the third "100" of the source is the third of the translation), in
+     place of letters the engine glued there ("100ósito").
 6. **What is left is logged** and counted by the `changed_tokens` check of
    `tools/defects.py`.
 
@@ -78,3 +82,7 @@ seen at all.
 - **2026-11-16:** omitted numbers were only reported; a last try now names
   them (rule 3). Codes were protected only by their digits; they are now
   checked whole (rules 1 and 4). Decided by the user.
+- **2026-11-17:** found by the translation review: "100Ω" became
+  "100ósito" unnoticed. The manual writes the OHM SIGN, U+2126, and the
+  check knew only the Greek letter. Both count now, and the repair puts
+  the sign back on the right "100".

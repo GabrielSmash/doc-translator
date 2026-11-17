@@ -86,3 +86,14 @@ def test_missing_tokens_name_the_code_not_its_digits():
     source = "Table 1: Standard RJ45 Wiring Colour Codes"
     assert missing_tokens(source, "Tabela 1: Códigos de cores de fiação padrão") == ["RJ45"]
     assert missing_tokens("pins 2 and 3", "pino 2") == ["3"]
+
+
+def test_the_ohm_sign_is_the_greek_omega():
+    # The manual writes U+2126; a translation writes U+03A9 or loses it.
+    source = "10Base-T (10 Mbps) or 100Base-TX (100 Mbps), and 568 100Ω STP cable"
+    assert token_problems("568 100Ω STP cable", "cabo STP 568 de 100Ω") == []
+    translation = "10Base-T (10 Mbps) ou 100Base-TX (100 Mbps), e cabos STP 568 de 100ósito"
+    assert token_problems(source, translation) == ["symbols lost: Ω"]
+    assert repair_tokens(source, translation) == (
+        "10Base-T (10 Mbps) ou 100Base-TX (100 Mbps), e cabos STP 568 de 100Ω"
+    )

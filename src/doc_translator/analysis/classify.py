@@ -63,6 +63,20 @@ def is_screen(lines: list[Line]) -> bool:
     return like >= SCREEN_SHARE * len(texts) and like >= SCREEN_MIN_LINES
 
 
+def screen_part(lines: list[Line]) -> list[Line]:
+    """The lines of a screen block that are the screen: those set in the
+    style of its screen-like lines. A PDF block can go on with the text
+    about the screen, in the body font ("To choose one of the menu
+    choices, press..."): that text is translated."""
+    like = [line for line in lines if any(p.search(line.text.strip()) for p in SCREEN_LINE)]
+    style = {_style(s) for line in like for s in line.visible_spans}
+    return [line for line in lines if all(_style(s) in style for s in line.visible_spans)]
+
+
+def _style(span) -> tuple[str, float]:
+    return (span.font, round(span.size, 1))
+
+
 # A block this many line heights below a screen, in its style and margin,
 # is the rest of the screen.
 SCREEN_GAP = 3.0
@@ -72,8 +86,8 @@ def continues_screen(lines: list[Line], screen: list[Line]) -> bool:
     if not lines or not screen:
         return False
     last = screen[-1]
-    style = {(s.font, round(s.size, 1)) for line in screen for s in line.spans if s.text.strip()}
-    same_style = all((s.font, round(s.size, 1)) in style for line in lines for s in line.spans if s.text.strip())
+    style = {_style(s) for line in screen for s in line.visible_spans}
+    same_style = all(_style(s) in style for line in lines for s in line.visible_spans)
     same_margin = all(abs(line.bbox.x0 - last.bbox.x0) <= 2 for line in lines)
     close = 0 <= lines[0].bbox.y0 - last.bbox.y1 <= SCREEN_GAP * last.bbox.height
     return same_style and same_margin and close

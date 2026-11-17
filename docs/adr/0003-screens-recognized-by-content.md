@@ -26,7 +26,10 @@ The sweep counted 49 screen lines and screen names translated.
    half of its lines look like a screen.
 2. **A screen grows to the blocks that follow it** (`continues_screen`):
    same style, same margin, close below (`login:` after the banner).
-3. **Screen blocks are kept as CODE**: not translated.
+3. **Screen lines are kept as CODE**: not translated. Only the lines set
+   in the style of the screen-like lines (`screen_part`): the PDF can put
+   the paragraph about a screen in the screen's block, in the body font,
+   and that paragraph is translated.
 4. **The names a screen shows are kept everywhere** (`terms.screen_names`,
    through `Unit.names` into `kept_terms`), like the italic interface
    labels. A name the document also writes as ordinary text ("Main Menu"
@@ -74,3 +77,8 @@ The sweep counted 49 screen lines and screen names translated.
   of prompts, tabs, buttons and keys were translated in some steps and
   kept in others; they are now kept where quoted (rule 5). Decided by the
   user.
+- **2026-11-17:** found by the translation review: three paragraphs (p15
+  "To choose one of the menu choices...", p18 "Press W if...", p19 "At
+  this point, the serial connector...") were left in English. The PDF
+  holds each in a screen's block, and the whole block was kept. Only the
+  lines in the screen's style are kept now (rule 3).

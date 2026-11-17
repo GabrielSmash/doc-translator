@@ -16,7 +16,10 @@ from ..languages import EN_PT_BR
 
 NUMBER = re.compile(r"\d+(?:[.,/:]\d+)*")
 # Signs that carry a value (units, legal marks): a translation keeps them.
-SYMBOLS = frozenset("Ω®™©°µ±×≤≥≈∞")
+SYMBOLS = frozenset("\u2126\u03a9®™©°\u00b5\u03bc±×≤≥≈∞")
+# One sign, two characters: the OHM SIGN and the MICRO SIGN look like the
+# Greek letters a translation writes ("100Ω" in the manual is U+2126).
+SAME_SIGN = {"\u2126": "\u03a9", "\u00b5": "\u03bc"}
 # Control tokens of chat models, leaked into an answer.
 MODEL_TOKEN = re.compile(r"<\|[^<>|]*\|>|</?(?:tool_call|tool_response|think)>")
 # A number written right before a sign ("100Ω", "25 °"), so the sign can be
@@ -55,8 +58,12 @@ def added_numbers(source: str, translation: str) -> set[str]:
     return numbers(translation) - numbers(source)
 
 
+def _signs(text: str) -> set[str]:
+    return {SAME_SIGN.get(c, c) for c in text if c in SYMBOLS}
+
+
 def lost_symbols(source: str, translation: str) -> set[str]:
-    return {c for c in source if c in SYMBOLS} - set(translation)
+    return _signs(source) - _signs(translation)
 
 
 def codes(text: str, stopwords: frozenset[str] = EN_PT_BR.source_stopwords) -> list[str]:
@@ -120,12 +127,28 @@ def repair_tokens(source: str, translation: str) -> str:
     missing from the translation (a reordered sentence is left alone)."""
     text = MODEL_TOKEN.sub(lambda m: "" if m.group(0) not in source else m.group(0), translation)
     text = _repair_numbers(source, _repair_glued(source, text))
-    for number, symbol in NUMBER_SYMBOL.findall(source):
-        if symbol in text:
+    lost = lost_symbols(source, text)
+    for match in NUMBER_SYMBOL.finditer(source):
+        number, symbol = match.groups()
+        if SAME_SIGN.get(symbol, symbol) not in lost:
             continue
-        after_number = rf"(?<![\d.,]){re.escape(number)}(?![\d.,]*\d)"
-        text = re.sub(after_number, lambda m, sign=symbol: m.group(0) + sign, text, count=1)
+        text = _put_sign(source[: match.start()], number, symbol, text, source)
     return re.sub(r"  +", " ", text).strip() if text != translation else translation
+
+
+def _put_sign(before: str, number: str, symbol: str, text: str, source: str) -> str:
+    """`symbol` written again after the same occurrence of `number` (the
+    third "100" of the source is the third of the translation: "100Base-TX
+    (100 Mbps) ... 100Ω"). Letters the engine glued in its place, which the
+    source doesn't have, go ("100ósito")."""
+    standalone = re.compile(rf"(?<![\d.,]){re.escape(number)}(?![\d.,]*\d)")
+    found = list(standalone.finditer(text))
+    if not found:
+        return text
+    spot = found[min(len(standalone.findall(before)), len(found) - 1)]
+    glued = re.match(r"[^\W\d_]+", text[spot.end() :])
+    end = spot.end() + (len(glued.group(0)) if glued and glued.group(0) not in source else 0)
+    return text[: spot.end()] + symbol + text[end:]
 
 
 def _repair_numbers(source: str, translation: str) -> str:

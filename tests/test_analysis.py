@@ -210,6 +210,27 @@ def test_screens_are_kept_whatever_their_font():
     assert translated == ["For example:", "If the prompt does not appear, check the cable and the port."]
 
 
+def test_text_about_a_screen_in_its_block_is_translated():
+    # Manual p15: the PDF puts the paragraph under the menu in the menu's
+    # block, in the body font.
+    mono = {"fontname": "Times-Bold", "fontsize": 9}
+    page = page_with(
+        ("**** Main Menu ****", (81, 72), mono),
+        ("<1> Network Setup", (81, 82), mono),
+        ("<2> SNMP Setup", (81, 92), mono),
+        ("<X> Exit", (81, 102), mono),
+        ("To choose one of the menu choices, press the letter shown", (58, 116), {"fontsize": 11}),
+        ("on the left and then press <Enter>.", (58, 129), {"fontsize": 11}),
+    )
+    page_text = page.get_text("dict")["blocks"]
+    assert len([b for b in page_text if "lines" in b]) == 1  # one block, as in the manual
+    blocks = analyze_page(page)
+    kept = " ".join(b.text for b in blocks if b.action == Action.KEEP)
+    translated = " ".join(b.text for b in blocks if b.action == Action.TRANSLATE)
+    assert "<1> Network Setup" in kept and "To choose" not in kept
+    assert translated.startswith("To choose one of the menu choices")
+
+
 def test_prose_with_numbered_items_is_not_a_screen():
     page = page_with(
         ("(1) Enter the amount from line 3 of the worksheet.", (72, 72), {}),
