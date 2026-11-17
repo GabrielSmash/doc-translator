@@ -5,6 +5,7 @@ Only English to Brazilian Portuguese exists. Keeping its specifics here
 new value of LanguagePair, not edits across the engines.
 """
 
+import re
 from dataclasses import dataclass
 
 
@@ -29,6 +30,25 @@ class LanguagePair:
     # kept by both engines: a table cell "N/A" spelled out as "NÃO
     # APLICÁVEL" no longer fits its column.
     kept_abbreviations: frozenset[str] = frozenset()
+    # Month abbreviations of dates ("Aug 01" -> "Ago 01"): written by a
+    # table, not by the engines, which leave them in a table cell as they are.
+    month_abbreviations: tuple[tuple[str, str], ...] = ()
+    # Words that start source sentences and are not words of the target
+    # language: one of them before a translated rest was left untranslated
+    # ("The 7700FC controlador...", "To atualizar..."). "Use", "A" or "Note"
+    # start sentences in both languages, so they are not here.
+    source_only_starts: frozenset[str] = frozenset()
+
+    def localize_dates(self, source: str, translation: str) -> str:
+        """`translation` with the source's month abbreviations, still written
+        as in the source before a day or a year, in the target language."""
+        for month, target in self.month_abbreviations:
+            for written in {month, month.upper()}:
+                if not re.search(rf"\b{written}\b", source):
+                    continue
+                local = target.upper() if written.isupper() else target
+                translation = re.sub(rf"\b{written}\b(?=\.?\s*\d)", local, translation)
+        return translation
 
 
 EN_PT_BR = LanguagePair(
@@ -54,4 +74,14 @@ Boot Loader => KEEP""",
         "nos", "nas", "para", "por", "com", "ao", "aos", "à", "às", "um", "uma",
     }),
     kept_abbreviations=frozenset({"N/A"}),
+    source_only_starts=frozenset({
+        "the", "to", "press", "if", "when", "this", "these", "those", "for", "with",
+        "click", "select", "enter", "type", "connect", "make", "upon", "after",
+        "before", "once", "an", "and", "or", "of", "in", "on", "it", "you", "your",
+        "all", "each", "then", "while", "where", "which", "there", "only", "both",
+    }),
+    month_abbreviations=(
+        ("Feb", "Fev"), ("Apr", "Abr"), ("May", "Mai"), ("Aug", "Ago"),
+        ("Sep", "Set"), ("Sept", "Set"), ("Oct", "Out"), ("Dec", "Dez"),
+    ),
 )

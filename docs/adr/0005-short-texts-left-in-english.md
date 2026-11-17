@@ -1,6 +1,6 @@
 # ADR 0005: Short texts left in English are checked
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-16
 - **Cause:** T4 of [the fidelity sweep](../architecture.md#phase-8-translation-fidelity-by-cause)
 
@@ -21,25 +21,55 @@ A run with logging showed that no batch failed: the model returned these
 texts in English. Nothing checks for this, because "left as written" is a
 valid answer for codes, names and kept terms. So it is never retried.
 
-## Proposal
+## Decision
 
-1. **A check, `untranslated`:** the answer equals the source, or keeps a
-   run of source-language words. Kept terms, screen names, codes and
-   numbers are excluded first. Source-language words are told by the
-   language pair's stopwords plus a short-word dictionary.
-2. **A partial check:** the answer starts with a source-language function
-   word (`The`, `To`, `Press`) followed by target-language text.
-3. **Retry** what the checks find, with the reason in the prompt ("this was
-   left in English").
-4. **Count it** in `tools/defects.py`, so the fast engine is measured too.
+1. **A short text returned exactly as written is checked**
+   (`checks.unchanged_words`). Its ordinary words count as left in
+   English. Not counted:
+   - kept terms (labels, screen names, quoted names, "N/A");
+   - codes and short all-capital abbreviations ("GND", "LED");
+   - dates ("Aug 01", rule 3);
+   - texts with a formula ("PE(pos,2i) = sin(...)").
+2. **What the document tells decides what is a word** (`Vocabulary`):
+   - only words the document also writes in lowercase in its running text
+     count. Words it only writes capitalized are names ("Vaswani",
+     "Google Brain", "Ethernet");
+   - a text that is, whole, a name its screens show or it keeps ("Gateway",
+     "login:") is that name.
+3. **Month abbreviations of dates are written by a table**
+   (`LanguagePair.localize_dates`), not by the engines: "Aug 01" → "Ago 01",
+   "SEP 04" → "SET 04". Only abbreviations the source has, before a day or
+   a year. Not for the measuring engines (identity, pseudo).
+4. **A sentence whose first word was left in English** before a translated
+   rest is checked (`checks.leading_source_word`): "The 7700FC
+   controlador...", "Press W se você...", "To atualizar...". Only words that
+   start English sentences and are not Portuguese words
+   (`LanguagePair.source_only_starts`): "Use" or "Note" start sentences in
+   both languages.
+5. **The LLM engine retries** what rules 1 and 4 find (severity 3, like a
+   sentence left untranslated). If the retry returns the text as written
+   again, it is kept: the model judged it a name.
+6. Check: `left_in_english` in `tools/defects.py`, the same rules.
 
-## To decide
+## Consequences
 
-1. **What may stay in English:** single words that are also Portuguese
-   technical usage (`Status`, `Link`, `Setup`, `Baud`). A list per
-   language pair, or the glossary's decision (ADR 0006).
-2. **Month abbreviations in dates** (`Aug 01` → `Ago 01`): translate, or
-   keep dates as written like numbers.
-3. **Table 3 as a whole:** its context prompt already holds the table, so
-   the model chose English for the whole table. The retry may return
-   English again. A second step would send each untranslated cell alone.
+- Manual, LLM engine: short texts returned as written with ordinary words
+  88 → 61 (the 61 left are names, codes and abbreviations: "IP Address",
+  "Tx", "Gnd"); `left_in_english` reports 4 ("SERIAL I/O", "SFF POWER",
+  "EVERTZ"). Sentences starting with an English word: 5 → 0.
+- Translated now: the revision table ("REVISÃO", "DESCRIÇÃO", "Ago 01",
+  "Dez 04"), the spec labels ("Taxa de Baud:", "Alimentação:", "Montagem
+  em quadro 7700FR-C:"), Table 3 ("Pino", "Chave", "Fêmea D de 9 pinos").
+- Single words retried without context bring wrong words: "PC End" →
+  "Fim do PC" (the cable's end, "extremidade"), "Ribbon Cable" → "Cabo de
+  faixa", "2 row X 3 pin Berg" → "2 filete X 3 pino Berg", "Baud" →
+  "Velocidade"; a test run also gave "Pin" → "Pinho". These are domain
+  terms, the subject of ADR 0006; the user chose to accept them until
+  then.
+- The identity engine counts every text in `left_in_english`: it returns
+  the source. The column only means something for translating engines.
+
+## Decisions taken
+
+- **2026-11-17:** the three points were decided by the user: the check now
+  (not with ADR 0006), months by a table, and the first-word check.

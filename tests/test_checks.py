@@ -97,3 +97,47 @@ def test_the_ohm_sign_is_the_greek_omega():
     assert repair_tokens(source, translation) == (
         "10Base-T (10 Mbps) ou 100Base-TX (100 Mbps), e cabos STP 568 de 100Ω"
     )
+
+
+def test_a_short_text_returned_as_written_is_left_in_english():
+    from doc_translator.translators.base import Glossary, Unit
+    from doc_translator.translators.checks import (
+        leading_source_word,
+        unchanged_words,
+        vocabulary,
+    )
+
+    kept = Glossary(keep=["IP Address"]).pattern()
+    assert unchanged_words("Voltage:", "Voltage:", kept) == ["Voltage"]
+    assert unchanged_words("9 pin D Female", "9 pin D Female", kept) == ["pin", "Female"]
+    # Kept terms, codes, abbreviations and dates are written as they are.
+    assert unchanged_words("IP Address", "IP Address", kept) == []
+    assert unchanged_words("RJ-45 GND", "RJ-45 GND", kept) == []
+    assert unchanged_words("Aug 01", "Aug 01", kept) == []
+    assert unchanged_words("Voltage:", "Tensão:", kept) == []
+    # Names are words the document never writes in lowercase in its running
+    # text; a text that is a name its screens show is that name.
+    units = [
+        Unit("Check the voltage of the female pin before you start.", names=["Gateway"]),
+        Unit("Google Brain, Vaswani"),
+        Unit("The address of the gateway is set by the network administrator."),
+    ]
+    known = vocabulary(units)
+    assert unchanged_words("Google Brain", "Google Brain", kept, known) == []
+    assert unchanged_words("Voltage:", "Voltage:", kept, known) == ["Voltage"]
+    assert unchanged_words("Gateway", "Gateway", kept, known) == []
+    assert unchanged_words("PE(pos,2i) = sin(pos)", "PE(pos,2i) = sin(pos)", kept) == []
+
+    assert leading_source_word("The Frame MIB allows the user", "The Frame MIB permite que o usuário", kept) == "The"
+    assert leading_source_word("Press W if you made an error", "Pressione W se você errou", kept) == ""
+    assert leading_source_word("IP Address of the card is set", "IP Address da placa é definido", kept) == ""
+
+
+def test_month_abbreviations_of_dates_are_written_in_the_target_language():
+    from doc_translator.languages import EN_PT_BR
+
+    assert EN_PT_BR.localize_dates("Aug 01", "Aug 01") == "Ago 01"
+    assert EN_PT_BR.localize_dates("SEP 04", "SEP 04") == "SET 04"
+    assert EN_PT_BR.localize_dates("Revised Dec. 2004", "Revisado em Dec. 2004") == "Revisado em Dez. 2004"
+    # Not a date: "May" as a word, and months the model already translated.
+    assert EN_PT_BR.localize_dates("You May 2 times", "Você pode 2 vezes") == "Você pode 2 vezes"

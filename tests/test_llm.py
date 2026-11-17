@@ -20,6 +20,7 @@ class FakeLLM(LLMTranslator):
         self._sections = {}
         self._tables = {}
         self._table_cells = {}
+        self._known = None
         self.answers = iter(answers)
         self.prompts: list[list[dict]] = []
         self.brief = None  # None: skip the description call
@@ -347,3 +348,20 @@ def test_a_name_translated_twice_is_named_in_a_last_try():
     results = llm.translate_units([Unit("SNMP Setup is used to identify trap destinations.")])
     assert results[0].text == "SNMP Setup é usado para destinos de trap."
     assert "dropped or changed these; write each exactly as given: SNMP Setup" in llm.prompts[2][0]["content"]
+
+
+def test_a_label_returned_in_english_is_retried():
+    llm = FakeLLM(
+        [
+            json.dumps({"translations": ["Voltage:", "Verifique a tensão antes de ligar a placa ao quadro."]}),
+            "Tensão:",
+        ]
+    )
+    results = llm.translate_units([Unit("Voltage:"), Unit("Check the voltage before you plug the card into the frame.")])
+    assert results[0].text == "Tensão:"
+
+
+def test_a_name_returned_as_written_is_not_retried():
+    llm = FakeLLM([json.dumps({"translations": ["IP Address"]})], glossary=Glossary(keep=["IP Address"]))
+    assert llm.translate_units([Unit("IP Address")])[0].text == "IP Address"
+    assert len(llm.prompts) == 1

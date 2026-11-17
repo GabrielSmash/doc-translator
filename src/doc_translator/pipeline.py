@@ -15,6 +15,7 @@ from .analysis import Action, Block, Kind, analyze_page
 from .analysis.continued import continued, share
 from .analysis.tables import table_text, tables
 from .fonts import FontLibrary
+from .languages import LanguagePair
 from .layout import Placement, TranslatedParagraph, layout_page
 from .pdf.draw import draw_page
 from .pdf.read import graphic_areas
@@ -149,8 +150,9 @@ def _translate_document(doc: pymupdf.Document, translator: Translator, result: R
         whole = [_joined([result.units[i] for i in group]) for group in groups]
         stripped = [strip_affixes(unit) for unit in whole]
         translations = translator.translate_units([unit for unit, _, _ in stripped])
+        languages = _languages(translator)
         translations = [
-            _repaired(unit, restore_form(unit.text, translation, lead, trail))
+            _repaired(unit, restore_form(unit.text, translation, lead, trail), languages)
             for (unit, lead, trail), translation, unit in zip(stripped, translations, whole)
         ]
         by_index = {
@@ -227,10 +229,19 @@ def _shared(translation: UnitTranslation, units: list[Unit]) -> list[UnitTransla
     return pieces
 
 
-def _repaired(unit: Unit, translation: UnitTranslation) -> UnitTranslation:
+def _languages(translator) -> LanguagePair | None:
+    """The language pair of a translating engine (the measuring engines,
+    identity and pseudo, have none), through the cache that wraps it."""
+    return getattr(translator, "languages", None) or getattr(getattr(translator, "translator", None), "languages", None)
+
+
+def _repaired(unit: Unit, translation: UnitTranslation, languages: LanguagePair | None = None) -> UnitTranslation:
     """Numbers and signs the engine still changed after its retries, put
-    back; what can't be repaired is reported."""
+    back, and dates written in the target language; what can't be repaired
+    is reported."""
     text = repair_tokens(unit.text, translation.text)
+    if languages:
+        text = languages.localize_dates(unit.text, text)
     segments = [repair_tokens(s, t) for s, t in zip(unit.segments, translation.segments)]
     segments += translation.segments[len(segments) :]
     if problems := token_problems(unit.text, text):

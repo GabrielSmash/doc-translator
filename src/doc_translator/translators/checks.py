@@ -10,6 +10,7 @@ the same way for every engine.
 
 import re
 import unicodedata
+from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 from ..languages import EN_PT_BR
@@ -191,3 +192,79 @@ def _repair_glued(source: str, translation: str) -> str:
         return match.group(0)
 
     return re.sub(r"(?<![\d.,])(\d+)[-–](\d+(?:[.,]\d+)*)", fix, translation)
+
+
+# A word of the source returned as written: letters only, two or more.
+WORD = re.compile(r"[^\W\d_]{2,}")
+# All-capital words this short are abbreviations ("GND", "LED"), kept.
+ABBREVIATION_LETTERS = 4
+# Below this many words a text is a label, not a sentence.
+SENTENCE_WORDS = 4
+
+
+# Formulas are written in letters too ("PE(pos,2i) = sin(...)", "√dk").
+FORMULA = re.compile(r"[=∑∏∫√∈≤≥]")
+
+
+# Below this many words a text is a label or a cell, not running text.
+PROSE_WORDS = 8
+
+
+@dataclass(frozen=True)
+class Vocabulary:
+    """What a document tells about its words, for the checks of one text."""
+
+    # Words its running text writes in lowercase: words of its language.
+    # Words it only writes capitalized are names ("Vaswani", "Ethernet");
+    # formulas are left out ("dmodel", "dk").
+    ordinary: frozenset[str] = frozenset()
+    # Names it shows on screens or keeps ("Netmask", "login"), lowercase: a
+    # text that is one of them, whole, is a reference to it.
+    names: frozenset[str] = frozenset()
+
+
+def vocabulary(units) -> Vocabulary:
+    from ..terms import kept_terms
+
+    prose = [u.text for u in units if len(u.text.split()) >= PROSE_WORDS and not FORMULA.search(u.text)]
+    names = [n for u in units for n in u.names] + kept_terms(units).kept()
+    return Vocabulary(
+        ordinary=frozenset(w for text in prose for w in WORD.findall(text) if w.islower()),
+        names=frozenset(n.lower() for n in names),
+    )
+
+
+def unchanged_words(
+    source: str, translation: str, kept: re.Pattern | None, known: Vocabulary | None = None
+) -> list[str]:
+    """Ordinary words of a short text the engine returned exactly as
+    written ("Voltage:", "Ribbon Cable"): not kept terms (`kept` matches
+    them), codes, abbreviations, dates or formulas. With what the document
+    tells (`known`), only words it also writes as ordinary words count, and
+    a text that is a name it shows ("Gateway") is a name. Longer texts are
+    checked by the share of their words left in the source language."""
+    if translation.strip() != source.strip() or FORMULA.search(source):
+        return []
+    if known and source.strip(" :.#").lower() in known.names:
+        return []
+    text = kept.sub(" ", source) if kept else source
+    text = CODE.sub(" ", text)
+    text = re.sub(r"\b[A-Z][a-z]{2,3}\.?(?=\s*\d)", " ", text)  # "Aug 01": see localize_dates
+    words = [w for w in WORD.findall(text) if not (w.isupper() and len(w) <= ABBREVIATION_LETTERS)]
+    return [w for w in words if known is None or w.lower() in known.ordinary]
+
+
+def leading_source_word(
+    source: str, translation: str, kept: re.Pattern | None, starts: frozenset[str] = EN_PT_BR.source_only_starts
+) -> str:
+    """The first word of a sentence left in the source language before a
+    translated rest ("The 7700FC controlador...", "Press W se você...")."""
+    words, translated = source.split(), translation.split()
+    if len(words) < SENTENCE_WORDS or not translated or translation.strip() == source.strip():
+        return ""
+    first = words[0]
+    if translated[0] != first or first.lower() not in starts:
+        return ""
+    if kept and (match := kept.match(source)) and match.end() >= len(first):
+        return ""
+    return first

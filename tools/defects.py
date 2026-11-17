@@ -27,6 +27,9 @@ Checks, and the stage they watch:
   ("RJ45", "CR2032"), value signs ("Ω", "°") or model control tokens
   ("<tool_call>") differ from its source after the engine's retries and
   the repairs.
+- left_in_english (translation): a short text returned as written though
+  it has ordinary words ("Voltage:", "Ribbon Cable"), or a sentence whose
+  first word was left in English ("The 7700FC controlador...").
 - restarted_sentences (analysis): a piece of a paragraph that goes on from
   another block (after a page break: "cable into the RJ-45...") translated
   as a sentence of its own, starting with a capital.
@@ -61,6 +64,7 @@ CHECKS = (
     "changed_form",
     "changed_tokens",
     "translated_names",
+    "left_in_english",
     "restarted_sentences",
     "mixed_sizes",
     "inconsistent_words",
@@ -105,6 +109,7 @@ def find(original: pymupdf.Document, output: pymupdf.Document, result) -> list[F
     findings += _changed_form(result)
     findings += _changed_tokens(result)
     findings += _translated_names(result)
+    findings += _left_in_english(result)
     findings += _restarted_sentences(result)
     findings += _inconsistent_words(result)
     return findings
@@ -404,6 +409,28 @@ def _translated_names(result) -> list[Finding]:
         for name in kept.violations(unit.text, translation.text):
             page = page_of.get(id(translated.source), -1) + 1
             found.append(Finding("translated_names", page, unit.text, f"{name!r} -> {translation.text[:60]!r}"))
+    return found
+
+
+def _left_in_english(result) -> list[Finding]:
+    from doc_translator.terms import kept_terms
+    from doc_translator.translators.checks import (
+        leading_source_word,
+        unchanged_words,
+        vocabulary,
+    )
+
+    kept = kept_terms(result.units).pattern()
+    known = vocabulary(result.units)
+    page_of = {id(b): index for index, blocks in enumerate(result.pages) for b in blocks}
+    found = []
+    for translated, unit, translation in zip(result.translated, result.units, result.translations):
+        words = unchanged_words(unit.text, translation.text, kept, known)
+        if first := leading_source_word(unit.text, translation.text, kept):
+            words = [first]
+        if words:
+            page = page_of.get(id(translated.source), -1) + 1
+            found.append(Finding("left_in_english", page, unit.text, ", ".join(words)))
     return found
 
 

@@ -23,7 +23,16 @@ from ..languages import EN_PT_BR, LanguagePair
 from ..terms import kept_terms, quoted_terms, recurring_terms
 from .base import Glossary, Unit, UnitTranslation
 from .cache import glossary_id
-from .checks import NUMBER, codes, missing_tokens, token_problems
+from .checks import (
+    NUMBER,
+    Vocabulary,
+    codes,
+    leading_source_word,
+    missing_tokens,
+    token_problems,
+    unchanged_words,
+    vocabulary,
+)
 
 log = logging.getLogger(__name__)
 
@@ -119,6 +128,7 @@ class LLMTranslator:
         self._progress = None
         self._brief = ""
         self._sections: dict[str, str] = {}
+        self._known: Vocabulary | None = None
         self._tables: dict[str, str] = {}
         self._table_cells: dict[str, list[str]] = {}
         digest = self._check_model()
@@ -136,6 +146,7 @@ class LLMTranslator:
         # quoted by instructions, and abbreviations used as they are ("N/A").
         glossary = glossary.merged(kept_terms(units, self.languages)).merged(self.user_glossary)
         self._brief = self._describe(units)
+        self._known = vocabulary(units)
         for unit in units:
             self._sections.setdefault(unit.text, unit.section)
             if unit.table:
@@ -262,14 +273,14 @@ class LLMTranslator:
         results = []
         for index, (text, translation) in enumerate(zip(texts, translations)):
             translation = self._match_case(text, _clean(translation, text))
-            if _problems(text, translation, glossary) or _shifted(index, texts, translations):
+            if _problems(text, translation, glossary, self._known) or _shifted(index, texts, translations):
                 # Context for a lone retry: whatever preceded it in the batch.
                 previous = (context + texts[:index])[-CONTEXT_UNITS:]
                 retry = self._translate_one(text, previous, glossary)
                 # The retry can be worse (left in English where the batch
                 # only missed a glossary term): keep the lesser problem.
                 translation = min(
-                    [translation, retry], key=lambda t: _severity(text, t, glossary)
+                    [translation, retry], key=lambda t: _severity(text, t, glossary, self._known)
                 )
                 # Retried without knowing what was wrong, a model can drop the
                 # same code again ("RJ45") or translate the same name ("Network
@@ -279,9 +290,9 @@ class LLMTranslator:
                 if missing := missing_tokens(text, translation) + names:
                     last = self._translate_one(text, previous, glossary, missing)
                     translation = min(
-                        [translation, last], key=lambda t: _severity(text, t, glossary)
+                        [translation, last], key=lambda t: _severity(text, t, glossary, self._known)
                     )
-                if problems := _problems(text, translation, glossary):
+                if problems := _problems(text, translation, glossary, self._known):
                     log.warning("Check translation of %r (%s): %r", text[:50], problems, translation[:80])
             results.append(translation or text)
         return results
@@ -467,14 +478,18 @@ def _clean(answer: str, source: str) -> str:
     return text
 
 
-def _problems(source: str, translation: str, glossary: Glossary | None = None) -> str:
+def _problems(
+    source: str, translation: str, glossary: Glossary | None = None, known: Vocabulary | None = None
+) -> str:
     """Why a translation can't be trusted, or "" if it looks fine."""
-    return _check(source, translation, glossary)[1]
+    return _check(source, translation, glossary, known)[1]
 
 
-def _severity(source: str, translation: str, glossary: Glossary | None = None) -> int:
+def _severity(
+    source: str, translation: str, glossary: Glossary | None = None, known: Vocabulary | None = None
+) -> int:
     """0 for a translation that looks fine; higher is worse."""
-    return _check(source, translation, glossary)[0]
+    return _check(source, translation, glossary, known)[0]
 
 
 # A text with this many ordinary words (lowercase, 3+ letters) whose words
@@ -498,11 +513,18 @@ def _untranslated(source: str, translation: str) -> bool:
     return sum(w in kept for w in words) > UNTRANSLATED_SHARE * len(words)
 
 
-def _check(source: str, translation: str, glossary: Glossary | None) -> tuple[int, str]:
+def _check(
+    source: str, translation: str, glossary: Glossary | None, known: Vocabulary | None = None
+) -> tuple[int, str]:
     if not _plausible(source, translation):
         return 4, "empty or unexpected length"
     if _untranslated(source, translation):
         return 3, "left untranslated"
+    kept = Glossary(keep=glossary.keep, exact=glossary.exact, quoted=glossary.quoted).pattern() if glossary else None
+    if words := unchanged_words(source, translation, kept, known):
+        return 3, "left untranslated: " + ", ".join(words)
+    if word := leading_source_word(source, translation, kept):
+        return 3, f"first word left untranslated: {word}"
     # Small models sometimes alter numbers ("RS-232" -> "RS-230") or signs
     # ("100Ω" -> "100<tool_call>"): in a technical document that is worse
     # than an awkward sentence.
