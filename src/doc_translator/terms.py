@@ -50,6 +50,87 @@ def recurring_terms(
     }
 
 
+# Single domain words ("card", "jumper", "female"): ADR 0006. Decided once,
+# as a word is otherwise rendered anew at each use, often in its everyday
+# sense ("card" as "cartão", "End" as "Fim").
+MAX_DOMAIN_WORDS = 40
+MIN_DOMAIN_SPREAD = 3  # texts using the word
+DOMAIN_EXAMPLES = 2
+MAX_CELL_WORDS = 4
+
+
+def domain_words(units, languages=EN_PT_BR, exclude=()) -> dict[str, list[str]]:
+    """Single words naming the document's things, found by where it uses
+    them, not by their case: after a determiner in running text ("the card",
+    "a jumper"), or in short texts (cells, labels: "9 pin D Female").
+
+    Only words the document also writes in lowercase in its running text:
+    words it only writes capitalized are names ("Ethernet"). Returns {word:
+    short passages using it}, used in most texts first.
+    """
+    texts = [u.text for u in units]
+    prose = [t for t in texts if _is_prose(t)]
+    lowercase = {w for t in prose for w in WORD.findall(t) if w.islower()}
+    stopwords = languages.source_stopwords
+    skipped = {e.lower() for e in exclude}
+    determiner = "|".join(languages.source_determiners)
+    # The determiner, an optional code ("the 7700FC card"), and up to two
+    # words: "the card", "the card edge".
+    noun_place = re.compile(
+        rf"\b(?i:{determiner})\s+(?:[\w\-]*\d[\w\-]*\s+)?([a-z][a-z\-]{{2,}})(?:\s([a-z][a-z\-]{{2,}}))?"
+    )
+    spread: Counter[str] = Counter()
+    # Texts where a word names the thing ("into the frame."), not describes
+    # another ("the frame controller"): the examples that show its sense.
+    heads: dict[str, list[tuple[int, str]]] = {}
+    for text in texts:
+        found = set()
+        if text in prose:
+            for match in noun_place.finditer(text):
+                words = [w for w in match.groups() if w]
+                # Participles and gerunds describe ("the selected", "the following").
+                for index, word in enumerate(words):
+                    if word in stopwords or word.endswith(("ed", "ing")):
+                        words = words[:index]
+                        break
+                found.update(words)
+                if words:
+                    # "the card" shows the word better than "the white card".
+                    heads.setdefault(words[-1], []).append((len(words), _window(text, match.start())))
+        elif len(text.split()) <= MAX_CELL_WORDS and not FORMULA_SIGNS.search(text):
+            found = {w.lower() for w in WORD.findall(text)} - stopwords
+            for word in found:
+                heads.setdefault(word, [])
+        spread.update(w for w in found if w in lowercase and w not in skipped and len(w) > 2)
+
+    # "the same pins", "the front panel": a word only seen before another
+    # describes it.
+    words = [w for w, n in spread.most_common() if n >= MIN_DOMAIN_SPREAD and w in heads]
+    examples = {}
+    for word in words[:MAX_DOMAIN_WORDS]:
+        lowercase_use = re.compile(rf"(?<!\w){re.escape(word)}(?!\w)")
+        any_use = re.compile(lowercase_use.pattern, re.IGNORECASE)
+        # Then sentences writing the word in lowercase; a heading ("Card
+        # Edge Serial Port") shows less.
+        uses = sorted((t for t in texts if any_use.search(t)), key=lambda t: not lowercase_use.search(t))
+        uses = [_window(t, (lowercase_use.search(t) or any_use.search(t)).start()) for t in uses]
+        named = [passage for _, passage in sorted(heads[word], key=lambda h: h[0])]
+        examples[word] = list(dict.fromkeys(named + uses))[:DOMAIN_EXAMPLES]
+    return examples
+
+
+FORMULA_SIGNS = re.compile(r"[<>=]")
+EXAMPLE_CHARS = 160
+
+
+def _window(text: str, position: int) -> str:
+    """The sentence of `text` at `position`, shown as an example of use."""
+    start = max(text.rfind(end, 0, position) for end in (". ", "? ", "! ", ": ")) + 1
+    stops = [i for end in (". ", "? ", "! ") if (i := text.find(end, position)) >= 0]
+    sentence = " ".join(text[start : min(stops, default=len(text)) + 1].split())
+    return sentence[:EXAMPLE_CHARS]
+
+
 MAX_LABEL_WORDS = 4
 
 

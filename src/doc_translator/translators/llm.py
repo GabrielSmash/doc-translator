@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 
 from ..languages import EN_PT_BR, LanguagePair
-from ..terms import kept_terms, quoted_terms, recurring_terms
+from ..terms import domain_words, kept_terms, quoted_terms, recurring_terms
 from .base import Glossary, Unit, UnitTranslation
 from .cache import glossary_id
 from .checks import (
@@ -82,6 +82,12 @@ Answer one line per term, in the same order, exactly as in these examples:
 
 Terms, each with an example of use:
 {terms}"""
+# Single words: see _build_glossary.
+WORDS_PROMPT = """Translate this sentence of a technical document into \
+{target}, using the standard terminology of the document's field:
+{sentence}
+Answer with {{"translation": "...", "word": "..."}}: "word" is the {target} \
+word you used for "{word}", or "{word}" if you kept it in {source}."""
 TERM_LINE = re.compile(r"^\s*[-*\d.]*\s*(.+?)\s*=>\s*(.+?)\s*$")
 
 # Written once per document and shown with every batch: a paragraph alone
@@ -141,11 +147,13 @@ class LLMTranslator:
         self._progress = store
 
     def translate_units(self, units: list[Unit]) -> list[UnitTranslation]:
-        glossary = self._build_glossary(units)
         # Names of screens and fields, set in italics, shown on screens or
         # quoted by instructions, and abbreviations used as they are ("N/A").
-        glossary = glossary.merged(kept_terms(units, self.languages)).merged(self.user_glossary)
+        kept = kept_terms(units, self.languages)
+        # Described first: the terminology is decided knowing the field ("card"
+        # in a frame is a circuit board).
         self._brief = self._describe(units)
+        glossary = self._build_glossary(units, kept).merged(kept).merged(self.user_glossary)
         self._known = vocabulary(units)
         for unit in units:
             self._sections.setdefault(unit.text, unit.section)
@@ -211,29 +219,71 @@ class LLMTranslator:
 
     # -- glossary ------------------------------------------------------------
 
-    def _build_glossary(self, units: list[Unit]) -> Glossary:
-        """Ask the model to decide, once, how each recurring term is rendered."""
-        candidates = recurring_terms([u.text for u in units], self.languages.source_stopwords)
-        if not candidates:
-            return Glossary()
-        listing = "\n".join(
-            f'- {term} (e.g. "{_excerpt(example, term)}")' for term, example in candidates.items()
-        )
+    def _build_glossary(self, units: list[Unit], kept: Glossary | None = None) -> Glossary:
+        """Ask the model to decide, once, how each recurring term and each
+        domain word ("card", "jumper") is rendered (ADR 0006)."""
+        texts = [u.text for u in units]
+        terms = recurring_terms(texts, self.languages.source_stopwords)
+        decided = [*(kept.kept() if kept else []), *self.user_glossary.kept(), *self.user_glossary.terms]
+        words = domain_words(units, self.languages, exclude=[*decided, *terms])
+        glossary = Glossary()
+        if terms:
+            listing = "\n".join(f'- {term} (e.g. "{_excerpt(example, term)}")' for term, example in terms.items())
+            answer = self._ask_terminology(self._format(TERMS_PROMPT, terms=listing), len(terms))
+            self._read_decisions(answer, list(terms), glossary)
+        # Asked what a word is, the model answers with its everyday sense or
+        # keeps it ("card" -> "cartão", "pin" -> KEEP); asked to translate a
+        # sentence using it, it writes the field's word ("placa", "pino").
+        # One word per request: given a list, the model drops lines.
+        for word, uses in words.items():
+            if decision := self._word_used(word, uses[0]):
+                self._read_decisions(f"{word} => {decision}", [word], glossary)
+        # The model can't reliably tell UI labels from common terms; the
+        # document can: labels are the terms it puts between quotes.
+        for term in quoted_terms(texts, list(terms)):
+            glossary.terms.pop(term, None)
+            if term not in glossary.keep:
+                glossary.keep.append(term)
+        log.info("Terminology: keep %s; translate %s", glossary.keep, glossary.terms)
+        return glossary
+
+    def _word_used(self, word: str, sentence: str) -> str:
+        task = self._format(WORDS_PROMPT, sentence=sentence, word=word)
+        if self._brief:
+            task = f"About the document:\n{self._brief}\n\n{task}"
+        schema = {
+            "type": "object",
+            "properties": {"translation": {"type": "string"}, "word": {"type": "string"}},
+            "required": ["translation", "word"],
+        }
         try:
-            answer = self._chat(
-                [{"role": "user", "content": self._format(TERMS_PROMPT, terms=listing)}],
-                max_tokens=64 + 24 * len(candidates),
-            )
+            answer = json.loads(self._chat([{"role": "user", "content": task}], schema=schema, max_tokens=64 + len(sentence)))
+        except (ValueError, LLMError) as error:
+            log.debug("No decision for %r (%s)", word, error)
+            return ""
+        used = str(answer.get("word", "")).strip()
+        # A word the translation does not use was not its rendering.
+        return used if used.lower() in str(answer.get("translation", "")).lower() else ""
+
+    def _ask_terminology(self, task: str, lines: int) -> str:
+        if self._brief:
+            task = f"About the document:\n{self._brief}\n\n{task}"
+        try:
+            return self._chat([{"role": "user", "content": task}], max_tokens=64 + 24 * lines)
         except LLMError as error:
             log.warning("Could not decide the terminology (%s); continuing without it", error)
-            return Glossary()
+            return ""
 
-        by_name = {term.lower(): term for term in candidates}
-        glossary = Glossary()
+    @staticmethod
+    def _read_decisions(answer: str, asked: list[str], glossary: Glossary) -> None:
+        """Lines "term => decision" into `glossary`; the first answer per term."""
+        by_name = {term.lower(): term for term in asked}
         for line in answer.splitlines():
             if not (match := TERM_LINE.match(line)):
                 continue
-            term = by_name.get(match.group(1).strip("\"'`* ").lower())
+            # "<word> pin => pino": small models copy the placeholder.
+            name = re.sub(r"<[^>]*>", "", match.group(1)).strip("\"'`* ")
+            term = by_name.pop(name.lower(), None)
             decision = match.group(2).strip("\"'`* ")
             if not term or not decision:
                 continue  # only terms we asked about
@@ -241,14 +291,6 @@ class LLMTranslator:
                 glossary.keep.append(term)
             else:
                 glossary.terms[term] = decision
-        # The model can't reliably tell UI labels from common terms; the
-        # document can: labels are the terms it puts between quotes.
-        for term in quoted_terms([u.text for u in units], list(candidates)):
-            glossary.terms.pop(term, None)
-            if term not in glossary.keep:
-                glossary.keep.append(term)
-        log.info("Terminology: keep %s; translate %s", glossary.keep, glossary.terms)
-        return glossary
 
     # -- translation ---------------------------------------------------------
 

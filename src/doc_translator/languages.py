@@ -24,6 +24,9 @@ class LanguagePair:
     term_examples: str
     # Source words that never start or end a recurring term ("the", "of").
     source_stopwords: frozenset[str]
+    # Source words before a noun ("the", "each"): a word after one names a
+    # thing of the document ("the card", "a jumper").
+    source_determiners: tuple[str, ...]
     # Target words left lowercase in title case.
     target_minor_words: frozenset[str]
     # Source abbreviations readers of the target language use as they are,
@@ -68,7 +71,13 @@ Boot Loader => KEEP""",
     source_stopwords=frozenset({
         "a", "an", "and", "as", "at", "by", "for", "from", "if", "in", "into", "is",
         "it", "of", "on", "or", "the", "this", "to", "when", "with", "you", "your",
+        "are", "was", "be", "must", "can", "will", "should", "may", "has",
+        "have", "not", "that", "which", "so", "then", "using", "there",
     }),
+    source_determiners=(
+        "the", "a", "an", "this", "these", "those", "each", "every", "its", "your",
+        "their", "any", "both", "per",
+    ),
     target_minor_words=frozenset({
         "a", "o", "as", "os", "e", "de", "da", "do", "das", "dos", "em", "no", "na",
         "nos", "nas", "para", "por", "com", "ao", "aos", "à", "às", "um", "uma",

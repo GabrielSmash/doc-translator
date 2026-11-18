@@ -87,7 +87,6 @@ class Glossary:
 
     def relevant(self, text: str, source_language: str) -> str:
         """Glossary lines for the terms that occur in `text` (for prompts)."""
-        lower = text.lower()
         lines = [
             f'- "{term}": keep in {source_language}' for term in self.keep if _word(term, re.IGNORECASE).search(text)
         ]
@@ -101,10 +100,11 @@ class Glossary:
             for term in self.quoted
             if _quoted(term).search(text)
         ]
+        free = self._without_kept(text)
         lines += [
             f'- "{source}" -> "{target}"'
             for source, target in self.terms.items()
-            if source.lower() in lower
+            if _word_or_plural(source).search(free)
         ]
         return "\n".join(lines)
 
@@ -114,7 +114,7 @@ class Glossary:
         Translations are compared by word stems so that inflections
         ("controladores de quadro" for "controlador de quadro") still match.
         """
-        source_lower, translated = source.lower(), _fold(translation)
+        translated = _fold(translation)
         # Kept terms as whole words: "IP Address" is not in "IP addresses".
         missing = [t for t in self.keep if _word(t, re.IGNORECASE).search(source) and _fold(t) not in translated]
         # Compared as whole words ("Controle" holds "Control"), in Unicode's
@@ -122,8 +122,10 @@ class Glossary:
         plain = unicodedata.normalize("NFKC", translation)
         missing += [t for t in self.exact if _word(t).search(source) and not _word(t).search(plain)]
         missing += [t for t in self.quoted if _quoted(t).search(source) and not _word(t).search(plain)]
+        # "network" -> "rede", but not in the kept name "Network Setup".
+        free = self._without_kept(source)
         for term, target in self.terms.items():
-            if term.lower() in source_lower and not all(
+            if _word_or_plural(term).search(free) and not all(
                 _stem(word) in translated for word in _fold(target).split() if len(word) > 3
             ):
                 missing.append(term)
@@ -149,10 +151,20 @@ class Glossary:
     def kept(self) -> list[str]:
         return [*self.keep, *self.exact, *self.quoted]
 
+    def _without_kept(self, text: str) -> str:
+        kept = Glossary(keep=self.keep, exact=self.exact, quoted=self.quoted).pattern()
+        return kept.sub(" ", text) if kept else text
+
 
 def _word(term: str, flags: int = 0) -> re.Pattern:
     term = unicodedata.normalize("NFKC", term)
     return re.compile(rf"(?<!\w){re.escape(term)}(?!\w)", flags)
+
+
+def _word_or_plural(term: str) -> re.Pattern:
+    """`term` as whole words, also in the plural: "port" is in "ports", not
+    in "support"."""
+    return re.compile(rf"(?<!\w){re.escape(term)}(?:s|es)?(?!\w)", re.IGNORECASE)
 
 
 def _quoted(term: str) -> re.Pattern:

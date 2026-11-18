@@ -151,6 +151,27 @@ def test_terminology_is_decided_once_for_recurring_terms():
     assert "Frame Controller" in llm.prompts[0][0]["content"]
 
 
+def test_domain_words_are_decided_by_translating_a_sentence_using_them():
+    prose = [
+        "Insert the card into the frame and wait until the card starts up.",
+        "Remove the card from the frame before you change the jumper setting.",
+        "Each card reports its status to the controller over the network.",
+    ]
+    llm = FakeLLM(
+        [
+            json.dumps({"translation": "Insira a placa no quadro.", "word": "placa"}),
+            # A word the translation does not use is no decision.
+            json.dumps({"translation": "Insira a placa no quadro.", "word": "chassi"}),
+        ]
+    )
+    glossary = llm._build_glossary([Unit(t) for t in prose])
+    assert glossary.terms == {"card": "placa"}
+    # Asked to translate a sentence where the word names the thing.
+    assert "Insert the card into the frame" in llm.prompts[0][0]["content"]
+    assert '"card"' in llm.prompts[0][0]["content"]
+
+
+
 def test_terminology_violation_triggers_retry():
     glossary = Glossary(terms={"Frame Controller": "controlador de quadro"})
     llm = FakeLLM(

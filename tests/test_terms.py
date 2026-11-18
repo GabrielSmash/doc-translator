@@ -76,3 +76,34 @@ def test_kept_terms_are_whole_words():
     assert glossary.relevant("Set the IP addresses.", "English") == ""
     assert glossary.violations("Set the IP addresses.", "Defina os endereços IP.") == []
     assert glossary.violations("Set the IP Address.", "Defina o endereço IP.") == ["IP Address"]
+
+
+def test_domain_words_are_found_where_they_name_things():
+    from doc_translator.terms import domain_words
+
+    units = [
+        Unit("Insert the card into the frame and close the front door of the unit."),
+        Unit("Each card has a jumper that selects the mode when the frame starts."),
+        Unit("Remove the card from the frame before you move the jumper to a new place."),
+        Unit("Use the same steps for the following card in the Evertz frame."),
+        Unit("Put the jumper back when the upgrade of the unit is complete."),
+        Unit("9 pin D Female"),
+        Unit("15 pin D Female"),
+        Unit("The female pin of the cable goes into the pin header of the card."),
+    ]
+    words = domain_words(units)
+    assert list(words)[:2] == ["card", "frame"]
+    assert {"jumper", "pin", "female"} <= set(words)
+    # Describing words, and names only written capitalized, are not things.
+    assert not {"same", "following", "front", "evertz"} & set(words)
+    # Running text first, where the word is written in lowercase.
+    assert words["female"][0].startswith("The female pin")
+    assert "card" not in domain_words(units, exclude=["Card"])
+
+
+def test_a_fixed_word_is_matched_whole_and_not_inside_a_kept_name():
+    glossary = Glossary(keep=["Network Setup"], terms={"port": "porta", "network": "rede"})
+    assert glossary.violations("Check the support team.", "Verifique a equipe.") == []
+    assert glossary.violations("Connect both ports.", "Conecte as duas entradas.") == ["port"]
+    assert glossary.violations("Open Network Setup.", "Abra Network Setup.") == []
+    assert "network" not in glossary.relevant("Open Network Setup.", "English")
