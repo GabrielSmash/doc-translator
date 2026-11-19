@@ -380,7 +380,7 @@ order of harm: what changes a technical fact first.
 | T3 ([ADR 0004](adr/0004-a-paragraph-is-translated-whole.md)). One paragraph read as several: across a page break, or split by a space set in another size | `restarted_sentences` | Pieces of a paragraph are translated together and the translation shared back; sizes and baselines ignore blank spans; an answer that belongs to another item of the batch is retried | 4 → 0 |
 | T4 ([ADR 0005](adr/0005-short-texts-left-in-english.md)). Short texts left in English are never re-checked | `left_in_english` | A short text returned as written, with words the document writes in lowercase, is retried; a sentence whose first word stayed in English too; month abbreviations by a table | see ADR 0005 |
 | T5 ([ADR 0006](adr/0006-domain-terms-decided-once.md)). Domain terms read in their everyday sense, decided again at each use | `inconsistent_words` | Up to 40 single words naming the document's things are found by where it uses them (after a determiner, in cells); the model, given the document's description, translates a sentence using each and the word it used becomes the glossary's | "card": placa 17 / cartão 16 → placa 33; edge, end, port each one way |
-| T6 ([ADR 0007](adr/0007-limits-of-the-local-model.md)). Limits of the 4B model (gender, agreement, invented words) | — | model choice or a review pass | |
+| T6 ([ADR 0007](adr/0007-limits-of-the-local-model.md)). Limits of the 4B model (gender, agreement, invented words) | `unknown_words` | A larger model measured and rejected (worse and 4.5× slower here); words of a translation looked up in a pt-BR dictionary (VERO): invented ones retried and named, and dropped from glossary decisions | texts with invented words 24 → 10 |
 
 ## 6. Open decisions
 

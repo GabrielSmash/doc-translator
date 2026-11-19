@@ -436,6 +436,7 @@ SUMMARY = [
     ("changed_tokens", "tokens"),
     ("translated_names", "names"),
     ("left_in_english", "english"),
+    ("unknown_words", "unknown"),
     ("restarted_sentences", "restart"),
     ("mixed_sizes", "mixed"),
     ("inconsistent_words", "inconsist"),

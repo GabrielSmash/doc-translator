@@ -141,3 +141,19 @@ def test_month_abbreviations_of_dates_are_written_in_the_target_language():
     assert EN_PT_BR.localize_dates("Revised Dec. 2004", "Revisado em Dec. 2004") == "Revisado em Dez. 2004"
     # Not a date: "May" as a word, and months the model already translated.
     assert EN_PT_BR.localize_dates("You May 2 times", "Você pode 2 vezes") == "Você pode 2 vezes"
+
+
+def test_words_the_language_does_not_have_are_found():
+    from doc_translator.spelling import Spelling
+
+    class Words:
+        def lookup(self, word):
+            return word in {"Remova", "os", "da", "placa", "LED", "MONITORADAS"}
+
+    spelling = Spelling(Words())
+    assert spelling.unknown("Remove the jumpers", "Remova os RETIFOS da placa") == ["RETIFOS"]
+    # Words taken from the source or the document, and short abbreviations.
+    assert spelling.unknown("Remove the jumper", "Remova os jumpers da placa LED") == []
+    assert spelling.unknown("x", "broadcast", frozenset({"broadcast"})) == []
+    # Capitals do not hide a word: looked up in lowercase too.
+    assert spelling.unknown("x", "MONITORADAS", frozenset()) == []

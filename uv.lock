@@ -84,6 +84,7 @@ dependencies = [
     { name = "huggingface-hub" },
     { name = "pymupdf" },
     { name = "sentencepiece" },
+    { name = "spylls" },
 ]
 
 [package.optional-dependencies]
@@ -104,6 +105,7 @@ requires-dist = [
     { name = "nvidia-cublas-cu12", marker = "extra == 'gpu'" },
     { name = "pymupdf", specifier = ">=2.1" },
     { name = "sentencepiece", specifier = ">=0.2.2" },
+    { name = "spylls", specifier = ">=0.1.7" },
 ]
 provides-extras = ["gpu"]
 
@@ -664,6 +666,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/26/31/5dd6882ebe899f741a5cfe40ff56c6efc06bc26ee287abdb723b671f409c/sentencepiece-0.2.2-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:3f5851441ab1ef8634963a5100b733a8bbeefe623e0c5c005b1f1f3880e574cf", size = 1398307, upload-time = "2026-07-12T08:39:28.637Z" },
     { url = "https://files.pythonhosted.org/packages/da/05/7d7780fa63f4b8c1821953b916e25f89ae8f14d4da6ba91e10f6d06dc2b4/sentencepiece-0.2.2-cp314-cp314t-win_amd64.whl", hash = "sha256:046b15ea22d8042e2e173561d464ec3b64a9c2081324df70ebce7bf7ebb3e497", size = 1367133, upload-time = "2026-07-12T08:39:30.546Z" },
     { url = "https://files.pythonhosted.org/packages/49/a1/70007fef3f818c688de4a730f98024a671599ab67f20270f8efb03d69dcc/sentencepiece-0.2.2-cp314-cp314t-win_arm64.whl", hash = "sha256:fa9f5ef0e2a82233dd0b8b32ea3f5710e0c44afbc07ed3620219f32601e56090", size = 1302760, upload-time = "2026-07-12T08:39:32.457Z" },
+]
+
+[[package]]
+name = "spylls"
+version = "0.1.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5c/c2/19f34deb2dc1475dfeadafbd5666246041ee7578bb933e82de794f0a9283/spylls-0.1.7.tar.gz", hash = "sha256:7045892dcbd324d3685f69c5a760063e78fb839913724ce18077cf0a0c93f220", size = 1499693, upload-time = "2022-01-23T13:26:54.032Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cd/19/ce6fcb4b86e188983bcfc1f84e4ac6f3038ca8d68b6d70a678cdc566f66c/spylls-0.1.7-py2.py3-none-any.whl", hash = "sha256:0c7fa4b66615f390bd12fd37939b85934c012309fd3cce8584844c54270b7776", size = 1509482, upload-time = "2022-01-23T13:26:40.203Z" },
 ]
 
 [[package]]

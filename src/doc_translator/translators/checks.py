@@ -221,6 +221,9 @@ class Vocabulary:
     # Names it shows on screens or keeps ("Netmask", "login"), lowercase: a
     # text that is one of them, whole, is a reference to it.
     names: frozenset[str] = frozenset()
+    # Every word it writes, lowercase: a translation may take one as it is
+    # ("jumpers", "broadcast"), and it is no invented word.
+    source_words: frozenset[str] = frozenset()
 
 
 def vocabulary(units) -> Vocabulary:
@@ -231,6 +234,7 @@ def vocabulary(units) -> Vocabulary:
     return Vocabulary(
         ordinary=frozenset(w for text in prose for w in WORD.findall(text) if w.islower()),
         names=frozenset(n.lower() for n in names),
+        source_words=frozenset(w.lower() for u in units for w in WORD.findall(u.text)),
     )
 
 

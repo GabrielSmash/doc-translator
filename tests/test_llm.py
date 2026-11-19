@@ -21,9 +21,14 @@ class FakeLLM(LLMTranslator):
         self._tables = {}
         self._table_cells = {}
         self._known = None
+        self._spelling = None
         self.answers = iter(answers)
         self.prompts: list[list[dict]] = []
         self.brief = None  # None: skip the description call
+        self.spelling = None  # no dictionary download in tests
+
+    def _load_spelling(self):
+        return self.spelling
 
     def _describe(self, units):
         return super()._describe(units) if self.brief is not None else ""
@@ -386,3 +391,58 @@ def test_a_name_returned_as_written_is_not_retried():
     llm = FakeLLM([json.dumps({"translations": ["IP Address"]})], glossary=Glossary(keep=["IP Address"]))
     assert llm.translate_units([Unit("IP Address")])[0].text == "IP Address"
     assert len(llm.prompts) == 1
+
+
+class Words:
+    """A dictionary that knows every word but the ones given."""
+
+    def __init__(self, invented):
+        self.invented = invented
+
+    def lookup(self, word):
+        return word.lower() not in self.invented
+
+
+def test_an_invented_word_is_retried():
+    from doc_translator.spelling import Spelling
+
+    llm = FakeLLM(
+        [
+            json.dumps({"translations": ["Remova os RETIFOS da placa."]}),
+            "Remova os jumpers da placa.",
+        ]
+    )
+    llm.spelling = Spelling(Words({"retifos"}))
+    result = llm.translate_units([Unit("Remove the jumpers from the card.")])
+    assert result[0].text == "Remova os jumpers da placa."
+
+
+def test_a_word_still_invented_is_named_in_the_last_try():
+    from doc_translator.spelling import Spelling
+
+    llm = FakeLLM(
+        [
+            json.dumps({"translations": ["O cartão deve ser reinsertado."]}),
+            "O cartão deve ser reinsertado.",
+            "O cartão deve ser reinserido.",
+        ]
+    )
+    llm.spelling = Spelling(Words({"reinsertado"}))
+    result = llm.translate_units([Unit("The card must be reinserted now.")])
+    assert result[0].text == "O cartão deve ser reinserido."
+    assert "do not exist in Brazilian Portuguese: reinsertado" in llm.prompts[2][0]["content"]
+
+
+def test_a_decision_with_an_invented_word_is_dropped():
+    from doc_translator.spelling import Spelling
+
+    prose = [
+        "Set the netmask before you set the gateway of the card.",
+        "The netmask of the card is shown on the screen.",
+        "Write the netmask in the field and save the settings.",
+    ]
+    llm = FakeLLM([json.dumps({"translation": "Defina a máscara de subrede.", "word": "máscara de subrede"})] * 9)
+    llm.spelling = Spelling(Words({"subrede"}))
+    llm._spelling = llm.spelling
+    glossary = llm._build_glossary([Unit(t) for t in prose])
+    assert "netmask" not in glossary.terms

@@ -30,6 +30,9 @@ Checks, and the stage they watch:
 - left_in_english (translation): a short text returned as written though
   it has ordinary words ("Voltage:", "Ribbon Cable"), or a sentence whose
   first word was left in English ("The 7700FC controlador...").
+- unknown_words (translation): a word of a translation that the target
+  language's dictionary does not have and the document does not write:
+  invented by the model ("RETIFOS", "reinsertado").
 - restarted_sentences (analysis): a piece of a paragraph that goes on from
   another block (after a page break: "cable into the RJ-45...") translated
   as a sentence of its own, starting with a capital.
@@ -65,6 +68,7 @@ CHECKS = (
     "changed_tokens",
     "translated_names",
     "left_in_english",
+    "unknown_words",
     "restarted_sentences",
     "mixed_sizes",
     "inconsistent_words",
@@ -110,6 +114,7 @@ def find(original: pymupdf.Document, output: pymupdf.Document, result) -> list[F
     findings += _changed_tokens(result)
     findings += _translated_names(result)
     findings += _left_in_english(result)
+    findings += _unknown_words(result)
     findings += _restarted_sentences(result)
     findings += _inconsistent_words(result)
     return findings
@@ -431,6 +436,26 @@ def _left_in_english(result) -> list[Finding]:
         if words:
             page = page_of.get(id(translated.source), -1) + 1
             found.append(Finding("left_in_english", page, unit.text, ", ".join(words)))
+    return found
+
+
+def _unknown_words(result) -> list[Finding]:
+    from doc_translator.languages import EN_PT_BR
+    from doc_translator.spelling import spelling
+    from doc_translator.translators.checks import vocabulary
+
+    dictionary = spelling(EN_PT_BR)
+    if dictionary is None:
+        return []
+    known = vocabulary(result.units)
+    page_of = {id(b): index for index, blocks in enumerate(result.pages) for b in blocks}
+    found = []
+    for translated, unit, translation in zip(result.translated, result.units, result.translations):
+        if translation.text == unit.text:
+            continue
+        if words := dictionary.unknown(unit.text, translation.text, known.source_words):
+            page = page_of.get(id(translated.source), -1) + 1
+            found.append(Finding("unknown_words", page, unit.text, ", ".join(words)))
     return found
 
 

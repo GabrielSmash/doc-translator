@@ -20,6 +20,7 @@ import urllib.error
 import urllib.request
 
 from ..languages import EN_PT_BR, LanguagePair
+from ..spelling import Spelling, spelling
 from ..terms import domain_words, kept_terms, quoted_terms, recurring_terms
 from .base import Glossary, Unit, UnitTranslation
 from .cache import glossary_id
@@ -135,6 +136,7 @@ class LLMTranslator:
         self._brief = ""
         self._sections: dict[str, str] = {}
         self._known: Vocabulary | None = None
+        self._spelling: Spelling | None = None
         self._tables: dict[str, str] = {}
         self._table_cells: dict[str, list[str]] = {}
         digest = self._check_model()
@@ -153,8 +155,9 @@ class LLMTranslator:
         # Described first: the terminology is decided knowing the field ("card"
         # in a frame is a circuit board).
         self._brief = self._describe(units)
-        glossary = self._build_glossary(units, kept).merged(kept).merged(self.user_glossary)
         self._known = vocabulary(units)
+        self._spelling = self._load_spelling()
+        glossary = self._build_glossary(units, kept).merged(kept).merged(self.user_glossary)
         for unit in units:
             self._sections.setdefault(unit.text, unit.section)
             if unit.table:
@@ -172,6 +175,9 @@ class LLMTranslator:
             UnitTranslation(self._cache.get(u.text, u.text), [self._cache.get(s, s) for s in u.segments])
             for u in units
         ]
+
+    def _load_spelling(self) -> Spelling | None:
+        return spelling(self.languages)
 
     def _translate_all(self, texts: list[str], glossary: Glossary, with_context: bool) -> None:
         """Translate each distinct text once into self._cache (headers and
@@ -244,6 +250,13 @@ class LLMTranslator:
             glossary.terms.pop(term, None)
             if term not in glossary.keep:
                 glossary.keep.append(term)
+        # A decision with a word the language does not have ("máscara de
+        # subrede") would put that word everywhere.
+        if self._spelling is not None:
+            for term, decision in list(glossary.terms.items()):
+                if invented := self._spelling.unknown(term, decision):
+                    log.info("Terminology: %r -> %r dropped (%s)", term, decision, ", ".join(invented))
+                    del glossary.terms[term]
         log.info("Terminology: keep %s; translate %s", glossary.keep, glossary.terms)
         return glossary
 
@@ -315,32 +328,40 @@ class LLMTranslator:
         results = []
         for index, (text, translation) in enumerate(zip(texts, translations)):
             translation = self._match_case(text, _clean(translation, text))
-            if _problems(text, translation, glossary, self._known) or _shifted(index, texts, translations):
+            if _problems(text, translation, glossary, self._known, self._spelling) or _shifted(index, texts, translations):
                 # Context for a lone retry: whatever preceded it in the batch.
                 previous = (context + texts[:index])[-CONTEXT_UNITS:]
                 retry = self._translate_one(text, previous, glossary)
                 # The retry can be worse (left in English where the batch
                 # only missed a glossary term): keep the lesser problem.
                 translation = min(
-                    [translation, retry], key=lambda t: _severity(text, t, glossary, self._known)
+                    [translation, retry], key=lambda t: _severity(text, t, glossary, self._known, self._spelling)
                 )
                 # Retried without knowing what was wrong, a model can drop the
                 # same code again ("RJ45") or translate the same name ("Network
                 # Setup" starting a sentence): a last try names them.
                 kept = set(glossary.kept())
                 names = [t for t in glossary.violations(text, translation) if t in kept]
-                if missing := missing_tokens(text, translation) + names:
-                    last = self._translate_one(text, previous, glossary, missing)
+                # And words that do not exist ("reinsertado"): named, the model
+                # writes a real one.
+                invented = self._spelling.unknown(text, translation, self._known.source_words) if self._spelling and self._known else []
+                if (missing := missing_tokens(text, translation) + names) or invented:
+                    last = self._translate_one(text, previous, glossary, missing, invented)
                     translation = min(
-                        [translation, last], key=lambda t: _severity(text, t, glossary, self._known)
+                        [translation, last], key=lambda t: _severity(text, t, glossary, self._known, self._spelling)
                     )
-                if problems := _problems(text, translation, glossary, self._known):
+                if problems := _problems(text, translation, glossary, self._known, self._spelling):
                     log.warning("Check translation of %r (%s): %r", text[:50], problems, translation[:80])
             results.append(translation or text)
         return results
 
     def _translate_one(
-        self, text: str, context: list[str], glossary: Glossary, missing: list[str] | None = None
+        self,
+        text: str,
+        context: list[str],
+        glossary: Glossary,
+        missing: list[str] | None = None,
+        invented: list[str] | None = None,
     ) -> str:
         prompt = self._prompt(f"Translate this text:\n{text}", [text], context, glossary)
         if terms := glossary.relevant(text, self.languages.source):
@@ -355,6 +376,12 @@ class LLMTranslator:
             prompt[0]["content"] += (
                 "\n- A previous translation dropped or changed these; write each exactly as given: "
                 + ", ".join(missing)
+            )
+        if invented:
+            prompt[0]["content"] += (
+                f"\n- A previous translation used words that do not exist in {self.languages.target}: "
+                + ", ".join(invented)
+                + ". Use correctly spelled words."
             )
         translation = _clean(self._chat(prompt, max_tokens=64 + len(text)), text)
         return self._match_case(text, translation)
@@ -521,17 +548,25 @@ def _clean(answer: str, source: str) -> str:
 
 
 def _problems(
-    source: str, translation: str, glossary: Glossary | None = None, known: Vocabulary | None = None
+    source: str,
+    translation: str,
+    glossary: Glossary | None = None,
+    known: Vocabulary | None = None,
+    words: Spelling | None = None,
 ) -> str:
     """Why a translation can't be trusted, or "" if it looks fine."""
-    return _check(source, translation, glossary, known)[1]
+    return _check(source, translation, glossary, known, words)[1]
 
 
 def _severity(
-    source: str, translation: str, glossary: Glossary | None = None, known: Vocabulary | None = None
+    source: str,
+    translation: str,
+    glossary: Glossary | None = None,
+    known: Vocabulary | None = None,
+    words: Spelling | None = None,
 ) -> int:
     """0 for a translation that looks fine; higher is worse."""
-    return _check(source, translation, glossary, known)[0]
+    return _check(source, translation, glossary, known, words)[0]
 
 
 # A text with this many ordinary words (lowercase, 3+ letters) whose words
@@ -556,7 +591,11 @@ def _untranslated(source: str, translation: str) -> bool:
 
 
 def _check(
-    source: str, translation: str, glossary: Glossary | None, known: Vocabulary | None = None
+    source: str,
+    translation: str,
+    glossary: Glossary | None,
+    known: Vocabulary | None = None,
+    dictionary: Spelling | None = None,
 ) -> tuple[int, str]:
     if not _plausible(source, translation):
         return 4, "empty or unexpected length"
@@ -572,6 +611,10 @@ def _check(
     # than an awkward sentence.
     if problems := token_problems(source, translation):
         return 2, "; ".join(problems)
+    # Invented words ("RETIFOS", "reinsertado"): as wrong as a changed number.
+    source_words = known.source_words if known else frozenset()
+    if dictionary and (unknown := dictionary.unknown(source, translation, source_words)):
+        return 2, "not words of the language: " + ", ".join(unknown)
     if glossary and (terms := glossary.violations(source, translation)):
         return 1, "terminology not followed: " + ", ".join(terms)
     return 0, ""

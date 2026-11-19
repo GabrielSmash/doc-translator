@@ -34,6 +34,7 @@
   "styles_carried_pct": 100.0,
   "translated_names": 0,
   "translated_pct": 98.806,
+  "unknown_words": 0,
   "uri_links_lost": 0
  },
  "arxiv/pseudo": {
@@ -74,6 +75,7 @@
   "translated_names": 0,
   "translated_pct": 98.806,
   "unchanged_pct": 0.0,
+  "unknown_words": 93,
   "uri_links_lost": 0
  },
  "blank_accents/identity": {
@@ -486,6 +488,7 @@
   "styles_carried_pct": 100.0,
   "translated_names": 0,
   "translated_pct": 98.381,
+  "unknown_words": 0,
   "uri_links_lost": 0
  },
  "irs-w4/pseudo": {
@@ -526,6 +529,7 @@
   "translated_names": 0,
   "translated_pct": 98.381,
   "unchanged_pct": 0.0,
+  "unknown_words": 130,
   "uri_links_lost": 0
  },
  "nist/identity": {
@@ -563,6 +567,7 @@
   "styles_carried_pct": 100.0,
   "translated_names": 0,
   "translated_pct": 96.708,
+  "unknown_words": 0,
   "uri_links_lost": 0
  },
  "nist/pseudo": {
@@ -603,6 +608,7 @@
   "translated_names": 0,
   "translated_pct": 96.708,
   "unchanged_pct": 0.0,
+  "unknown_words": 64,
   "uri_links_lost": 0
  },
  "rotated_text/identity": {

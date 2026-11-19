@@ -37,7 +37,7 @@ except PackageNotFoundError:
 # IRS form instead of 89).
 _PACKAGE = Path(__file__).resolve().parent.parent
 TRANSLATION_CODE = sorted(
-    [*(_PACKAGE / "translators").glob("*.py"), _PACKAGE / "terms.py", _PACKAGE / "languages.py"]
+    [*(_PACKAGE / "translators").glob("*.py"), _PACKAGE / "terms.py", _PACKAGE / "languages.py", _PACKAGE / "spelling.py"]
 )
 
 

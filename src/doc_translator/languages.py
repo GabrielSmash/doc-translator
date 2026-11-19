@@ -41,6 +41,10 @@ class LanguagePair:
     # ("The 7700FC controlador...", "To atualizar..."). "Use", "A" or "Note"
     # start sentences in both languages, so they are not here.
     source_only_starts: frozenset[str] = frozenset()
+    # Hunspell dictionary of the target language (.dic and .aff), as (URL,
+    # SHA-256): words a translation has and the language does not were
+    # invented by the model ("RETIFOS"). Downloaded on first use.
+    target_dictionary: tuple[tuple[str, str], ...] = ()
 
     def localize_dates(self, source: str, translation: str) -> str:
         """`translation` with the source's month abbreviations, still written
@@ -53,6 +57,8 @@ class LanguagePair:
                 translation = re.sub(rf"\b{written}\b(?=\.?\s*\d)", local, translation)
         return translation
 
+
+VERO_COMMIT = "5cf23af85b47be6e398add826da1a02175be4238"
 
 EN_PT_BR = LanguagePair(
     source="English",
@@ -89,6 +95,15 @@ Boot Loader => KEEP""",
         "before", "once", "an", "and", "or", "of", "in", "on", "it", "you", "your",
         "all", "each", "then", "while", "where", "which", "there", "only", "both",
     }),
+    # LibreOffice's VERO dictionary, LGPLv3 or MPL 2.0, by Raimundo Moura
+    # and the LibreOffice community; pinned to a commit.
+    target_dictionary=tuple(
+        (f"https://raw.githubusercontent.com/LibreOffice/dictionaries/{VERO_COMMIT}/pt_BR/pt_BR.{ext}", sha256)
+        for ext, sha256 in (
+            ("dic", "a38bfb26b68ece2834e79fe83e48d5792652970ace12db89d1b9674bf9933183"),
+            ("aff", "21d8ad2a769a60e17e2b5ea4ef11d4d593a58b9e2a82d642ef82d6a4c5523865"),
+        )
+    ),
     month_abbreviations=(
         ("Feb", "Fev"), ("Apr", "Abr"), ("May", "Mai"), ("Aug", "Ago"),
         ("Sep", "Set"), ("Sept", "Set"), ("Oct", "Out"), ("Dec", "Dez"),

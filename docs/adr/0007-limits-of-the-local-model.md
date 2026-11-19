@@ -1,6 +1,6 @@
 # ADR 0007: Limits of the local model
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-16
 - **Cause:** T6 of [the fidelity sweep](../architecture.md#phase-8-translation-fidelity-by-cause)
 
@@ -46,13 +46,50 @@ makes as many grammar errors, at 4.5× the time. The prompts were tuned on
 the 4B model, which may favor it; still, a larger default is not
 justified on this machine. Option B already exists: `--llm-model`.
 
-## To decide
+## Decision
 
-1. **Which option, or which combination.** B with D is the cheapest; C is
-   the most thorough.
-2. **If A or B:** which models to measure, and on which machine as a
-   reference.
-3. **If D:** which word list (license compatible with AGPL-3.0).
+Option D, with B as it is (`--llm-model`, 4B by default).
 
-This ADR comes last: the measure of what the model gets wrong is only
-clean after ADRs 0005 and 0006 remove what the pipeline gets wrong.
+1. **Words of a translation are looked up in a dictionary of the target
+   language** (`spelling.py`): LibreOffice's VERO pt-BR Hunspell
+   dictionary (LGPLv3 or MPL 2.0), read by spylls (MIT, pure Python). The
+   dictionary is downloaded on first use from a pinned commit, checked
+   against its SHA-256, and kept in `~/.cache/doc-translator/dictionaries`.
+   Without it (no network), words are not checked.
+2. **Not counted as invented:**
+   - words of the source text or of the whole document ("jumpers",
+     "broadcast"), and their parts ("pré-softmax");
+   - all-capital abbreviations of up to 4 letters;
+   - capitalized words inside a text: names ("François");
+   - compounds made of words ("auto-atenção", "multi-cabeça").
+3. **The LLM engine retries** a translation with an invented word
+   (severity 2, like a changed number); if the word stays, the last try
+   names it ("A previous translation used words that do not exist in
+   Brazilian Portuguese: ...").
+4. **A glossary decision with an invented word is dropped** (ADR 0006):
+   "netmask" → "máscara de subrede" would put "subrede" everywhere.
+5. Check: `unknown_words` in `tools/defects.py` and the corpus measure.
+
+The Debian word list (`wbrazilian`) was rejected: GPL-2 only, which
+AGPL-3.0 code cannot use, and it lacks forms like "reinserido".
+
+## Consequences
+
+- Manual, LLM engine: texts with invented words 24 → 10. Fixed:
+  "RETIFOS" (JUMPERS), "Comply", "cometiu", "ejeitor", "ejeutor", the
+  glossary's "subrede" in the Netmask cells. Left: "defaulta",
+  "repositione", "reinsertado", "subrede" (in sentences) — the 4B model
+  writes them again even when named — and "antistática", a false alarm.
+- Time: 13 → 14.5 min.
+- False alarms on the corpus with the fast engine: arXiv 5 ("hiperparâmetros",
+  "autoatenção", "logaritmicamente": real words missing from the
+  dictionary), NIST 2, the manual 1 ("submontagem"). They cost a retry,
+  and the retry is kept only when it has fewer problems.
+- Not covered: agreement ("da cartão", "à adaptador"), wrong sense, wrong
+  part of speech. They need a review pass (option C), left for later.
+
+## Decisions taken
+
+- **2026-11-18:** a larger default model was measured (above) and
+  rejected by the user's choice of option D.
+- **2026-11-19:** option D, with the VERO dictionary.

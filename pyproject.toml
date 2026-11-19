@@ -29,6 +29,7 @@ dependencies = [
     "huggingface-hub>=2.4.0",
     "pymupdf>=2.1",
     "sentencepiece>=0.2.2",
+    "spylls>=0.1.7",
 ]
 
 [project.urls]

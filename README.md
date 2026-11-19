@@ -71,9 +71,9 @@ text and writes a short description of it (field, audience, names that stay
 as they are); every batch is sent with that description, the heading of its
 section and the preceding paragraphs.
 
-For better translations, at the cost of time, use a larger model:
-`--llm-model qwen3:8b` (on a 4 GB GPU, part of it runs on the CPU: about
-4–5 times slower).
+Another model can be chosen with `--llm-model`. On the reference manual,
+`qwen3:8b` was not better than the default and 4.5 times slower on a 4 GB
+GPU ([ADR 0007](docs/adr/0007-limits-of-the-local-model.md)).
 
 Each translation is checked; anything that fails is retried on its own and,
 if still wrong, reported in the logs (the lesser of the two problems is
@@ -83,6 +83,9 @@ kept):
 - implausible lengths (explanations, truncated answers, a heading answered
   with a sentence) are rejected;
 - text coming back in English is retried;
+- words that do not exist in Portuguese ("reinsertado") are retried, then
+  named to the model; they are looked up in LibreOffice's pt-BR dictionary
+  (VERO), downloaded once (~5 MB) on first use;
 - casing copied from neighboring items is undone.
 
 ### Glossary
@@ -179,4 +182,7 @@ runs the tests and uploads the package to PyPI (trusted publishing).
 
 [AGPL-3.0-or-later](LICENSE). The `fast` engine's model is a conversion of
 [Helsinki-NLP/opus-mt-tc-big-en-pt](https://huggingface.co/Helsinki-NLP/opus-mt-tc-big-en-pt),
-licensed CC-BY-4.0.
+licensed CC-BY-4.0. The pt-BR dictionary used to check words is
+LibreOffice's [VERO](https://github.com/LibreOffice/dictionaries/tree/master/pt_BR),
+licensed LGPLv3 or MPL 2.0; it is downloaded, not distributed with this
+package.
