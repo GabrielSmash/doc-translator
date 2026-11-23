@@ -145,8 +145,18 @@ def test_titles_are_written_in_sentence_case():
     assert _match_case("Figure 1: Block Diagram", "Figura 1: Diagrama de Blocos", Lowercase({"diagrama", "blocos", "de"})) == (
         "Figura 1: Diagrama de blocos"
     )
-    assert _match_case("Card Edge Serial Port", "Porta Serial da Borda", Lowercase({"porta", "serial", "da", "borda"})) == (
-        "Porta serial da borda"
+    # Words of the source keep its spelling: names and codes left as they are.
+    address = Lowercase({"paula", "cunha", "brasil", "santa", "rita", "do"})
+    assert _match_case("Avenida Frederico de Paula Cunha", "Avenida Frederico de Paula Cunha", address) == (
+        "Avenida Frederico de Paula Cunha"
+    )
+    assert _match_case("Santa Rita – MG – Brazil – CEP", "Santa Rita – MG – Brasil – CEP", address) == (
+        "Santa Rita – MG – Brasil – CEP"
+    )
+    assert _match_case("STD-B31 and ABNT NBR", "STD-B31 E ABNT NBR", Lowercase({"e", "b"})) == "STD-B31 e ABNT NBR"
+    single = Lowercase({"operação", "em", "single"})
+    assert _match_case("Operation in SFN (Single Frequency Network):", "Operação em SFN (Single Frequency Network):", single) == (
+        "Operação em SFN (Single Frequency Network):"
     )
     # Sentences are left as written.
     assert _match_case("the port of the frame", "a Porta do quadro", portuguese) == "a Porta do quadro"

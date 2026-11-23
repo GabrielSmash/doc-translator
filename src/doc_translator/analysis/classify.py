@@ -25,7 +25,10 @@ TABLE_MIN_COLUMNS = 3
 
 
 def kept_kind(line: Line) -> Kind | None:
-    """CODE or ROTATED for lines that are not translated; None otherwise."""
+    """CODE, ROTATED or HIDDEN for lines that are not translated; None
+    otherwise."""
+    if line.hidden:
+        return Kind.HIDDEN
     if not line.horizontal:
         # Labels along an axis, sideways table headers: rewriting them
         # horizontally cut them and spilled them over their neighbors.

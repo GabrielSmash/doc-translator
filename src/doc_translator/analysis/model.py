@@ -62,6 +62,9 @@ class Line:
     # line was read in pieces): lets tests check that every line of the
     # page ended up in a block.
     origins: tuple[tuple[int, int], ...] = ()
+    # Covered by an image the page paints after it: invisible in the
+    # original, it would show if written again on top.
+    hidden: bool = False
 
     @property
     def text(self) -> str:
@@ -130,6 +133,7 @@ class Kind(StrEnum):
     MARKER = "marker"  # a bullet or number standing apart from its text
     SYMBOLS = "symbols"  # punctuation and symbols only: nothing to translate
     ROTATED = "rotated"  # text not written left to right
+    HIDDEN = "hidden"  # covered by an image painted after it: not seen
 
 
 class Action(StrEnum):

@@ -22,7 +22,7 @@ import urllib.request
 from ..languages import EN_PT_BR, LanguagePair
 from ..spelling import Spelling, source_spelling, spelling
 from ..terms import domain_words, kept_terms, quoted_terms, recurring_terms
-from .base import Glossary, Unit, UnitTranslation
+from .base import Glossary, Unit, UnitTranslation, has_words
 from .cache import glossary_id
 from .checks import (
     NUMBER,
@@ -188,7 +188,7 @@ class LLMTranslator:
         preceding text as context."""
         first_seen: dict[str, int] = {}
         for index, text in enumerate(texts):
-            if any(c.isalpha() for c in text):
+            if has_words(text):
                 first_seen.setdefault(text, index)
         pending = list(first_seen)
         if self._progress is not None:
@@ -641,54 +641,64 @@ def _match_case(source: str, translation: str, dictionary: Spelling | None = Non
     The model copies casing from nearby items: an uppercase translation of
     a text that is not uppercase is rewritten. Titles and labels are written
     in sentence case, as Portuguese does ("Frame Communication" ->
-    "Comunicação do quadro", not "Comunicação de Quadro"). A word keeps
-    its capital when it comes from the source as written ("Ethernet",
-    "VistaLINK"), is an acronym of the source, or is a name: a word the
-    target dictionary only has capitalized ("Califórnia"). Without a
-    dictionary, words of a mixed-case translation keep their case.
+    "Comunicação do quadro", not "Comunicação de Quadro").
+
+    Only translated words change: a word of the source keeps the source's
+    spelling ("VistaLINK", "STD-B31", "Paula Cunha", "Single Frequency
+    Network"). A translated word is lowercased where the target dictionary
+    has it in lowercase and it sits among translated words: beside words
+    of the source it belongs to a name left as it is ("MG – Brasil –
+    CEP"). Without a dictionary, a mixed-case translation keeps its case.
     """
     if _mostly_upper(source):
         return translation.upper()
     upper = _mostly_upper(translation)
     written = {w.lower(): w for w in re.findall(r"[^\W\d_]+", source)}
-    first_word = re.search(r"[^\W\d_]+", translation)
-    first_start = first_word.start() if first_word else -1
+    words = list(re.finditer(r"[^\W\d_]+", translation))
+    if not words:
+        return translation
     title = _title_case(source)
     # Glossary renderings are lowercase ("controlador de quadro"); at the
     # start of a text they follow the source's capital.
     capital = next((c for c in source if c.isalpha()), "").isupper()
+    translated = [w.group(0).lower() not in written for w in words]
 
-    def fix(match: re.Match) -> str:
+    def among_translated(index: int) -> bool:
+        neighbors = [i for i in (index - 1, index + 1) if 0 <= i < len(words)]
+        return bool(neighbors) and all(translated[i] for i in neighbors)
+
+    def cased(index: int) -> str:
+        match = words[index]
         word = match.group(0)
         lower = word.lower()
-        source_word = written.get(lower, lower)
-        # As the source writes it: "VistaLINK", "LED", a capital inside a
-        # sentence. In a title, a capital says nothing ("Card Edge Serial
-        # Port" -> "porta serial").
-        from_source = source_word != lower and not (title and source_word == lower.capitalize())
+        if not translated[index]:
+            return written[lower] if upper else word
         if upper:
-            if from_source:
-                word = source_word
-            elif dictionary is not None and not dictionary.has(lower):
-                word = lower.capitalize()  # a name
-            else:
-                word = lower
-        elif (
+            if dictionary is not None and not dictionary.has(lower):
+                return lower.capitalize()  # a name ("CALIFÓRNIA")
+            return lower
+        if (
             title
+            and index > 0
             and word[0].isupper()
             and word[1:].islower()
-            and not from_source
             and dictionary is not None
             and dictionary.has(lower)
+            and among_translated(index)
             # After "Figura 1:" a caption starts again.
             and not re.search(r"[:.]\s*$", translation[: match.start()])
         ):
-            word = lower  # "Comunicação de Quadro": a word of the language, capitalized
-        if match.start() == first_start and capital:
-            return word[0].upper() + word[1:]
+            return lower  # "Comunicação de Quadro": a word of the language, capitalized
         return word
 
-    return re.sub(r"[^\W\d_]+", fix, translation)
+    pieces, end = [], 0
+    for index, match in enumerate(words):
+        word = cased(index)
+        if index == 0 and capital:
+            word = word[0].upper() + word[1:]
+        pieces += [translation[end : match.start()], word]
+        end = match.end()
+    return "".join(pieces) + translation[end:]
 
 
 def _title_case(text: str) -> bool:

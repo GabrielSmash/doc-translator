@@ -8,7 +8,10 @@ Checks, and the stage they watch:
 
 - split_lines (analysis): one line of text read as pieces of several
   paragraphs, each translated on its own.
-- overlapping_text (layout): written lines that run into other text.
+- revealed_text (drawing): text the original hides under an image painted
+  after it (a cover's page number), written again on top, in sight.
+- overlapping_text (layout): written lines that run into other text, or
+  into each other within one paragraph (lines set closer than their size).
 - crossed_rules (layout): written lines that cross a table or frame rule
   the original line did not cross (text out of its cell).
 - misplaced_leaders (drawing): table-of-contents page numbers not on their
@@ -47,6 +50,7 @@ Usage:
 """
 
 import argparse
+import itertools
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -72,6 +76,7 @@ CHECKS = (
     "restarted_sentences",
     "mixed_sizes",
     "inconsistent_words",
+    "revealed_text",
 )
 # Gaps between words of one line reach this many font sizes in justified text.
 WORD_GAP = 1.5
@@ -108,6 +113,7 @@ def find(original: pymupdf.Document, output: pymupdf.Document, result) -> list[F
             *_grown_cells(index, placed, rules),
             *_headings_in_cells(index, blocks, rules),
             *_mixed_sizes(index, placed),
+            *_revealed_text(index, page, placed),
         ]
     findings += _misplaced_leaders(output, result)
     findings += _changed_form(result)
@@ -200,6 +206,15 @@ def _split_lines(index: int, blocks, rules) -> list[Finding]:
     return found
 
 
+def _revealed_text(index: int, page: pymupdf.Page, placed) -> list[Finding]:
+    hidden = [line.bbox for block in read_page(page).blocks for line in block.lines if line.hidden]
+    return [
+        Finding("revealed_text", index + 1, p.paragraph.source.text[:70])
+        for p in placed
+        if any(line.bbox.intersects(h) for line in p.paragraph.source.lines for h in hidden)
+    ]
+
+
 def _overlapping_text(index: int, placed, blocks) -> list[Finding]:
     # Kept text (code, markers) is written where it was: its source lines.
     written = [(p.paragraph.source, [line.rect for line in p.lines]) for p in placed]
@@ -213,6 +228,16 @@ def _overlapping_text(index: int, placed, blocks) -> list[Finding]:
             if any(_ink(a.bbox).intersects(_ink(b.bbox)) for a in source_a.lines for b in source_b.lines):
                 continue
             found.append(Finding("overlapping_text", index + 1, f"{source_a.text[:35]} | {source_b.text[:35]}"))
+    for placement in placed:
+        lines = [line.rect for line in placement.lines]
+        # A line after a wrap starts at the left and is as tall: subscripts
+        # ("dk") are short pieces inside a line, and smaller.
+        if any(
+            _ink(a).intersects(_ink(b)) and b.x0 <= min(lines, key=lambda r: r.x0).x0 + 1 and b.height >= 0.8 * a.height
+            for a, b in itertools.pairwise(lines)
+        ):
+            source = placement.paragraph.source
+            found.append(Finding("overlapping_text", index + 1, source.text[:70], "lines over each other"))
     return found
 
 

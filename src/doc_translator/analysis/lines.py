@@ -44,7 +44,7 @@ def visual_lines(line: Line, links: list[tuple[pymupdf.Rect, str]]) -> list[Line
         rect = pymupdf.Rect(group[0].bbox)
         for span in group[1:]:
             rect |= span.bbox
-        lines.append(Line(group, rect, line.direction, line.origins))
+        lines.append(Line(group, rect, line.direction, line.origins, line.hidden))
     return lines
 
 
@@ -117,7 +117,7 @@ def _join(left: Line, right: Line, space: bool = True) -> Line:
     if space and not left.text.endswith(" ") and not right.text.startswith(" "):
         last = spans[-1]
         spans[-1] = Span(**{**last.__dict__, "text": last.text + " "})
-    return Line(spans + right.spans, left.bbox | right.bbox, left.direction, left.origins + right.origins)
+    return Line(spans + right.spans, left.bbox | right.bbox, left.direction, left.origins + right.origins, left.hidden and right.hidden)
 
 
 def _mark_raised(line: Line) -> None:

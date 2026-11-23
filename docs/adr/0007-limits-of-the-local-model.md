@@ -96,12 +96,14 @@ title-case source was rewritten in title case. Titles and labels are now
 written in sentence case, as Brazilian manuals do (`llm._match_case`):
 
 - a capitalized word of a title-case source's translation is lowercased
-  when the pt-BR dictionary has it in lowercase and it is not from the
-  source ("Comunicação de Quadro" -> "Comunicação de quadro");
-- words from the source keep its casing ("Ethernet", "VistaLINK",
-  "LEDs"); names keep their capital ("Califórnia": the dictionary only has
-  it capitalized); a caption starts again after its colon ("Figura 1:
-  Diagrama de blocos");
+  when it was translated (not a word of the source), the pt-BR dictionary
+  has it in lowercase, and the words beside it were translated too
+  ("Comunicação de Quadro" -> "Comunicação de quadro");
+- words of the source keep its spelling: names and codes left as they
+  are ("Paula Cunha", "Single Frequency Network", "STD-B31", "Base-T");
+  a translated word beside them belongs to the name ("MG – Brasil –
+  CEP"); a caption starts again after its colon ("Figura 1: Diagrama de
+  blocos");
 - sentences are left as the model writes them.
 
 ## Decisions taken

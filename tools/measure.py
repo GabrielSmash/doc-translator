@@ -440,6 +440,7 @@ SUMMARY = [
     ("restarted_sentences", "restart"),
     ("mixed_sizes", "mixed"),
     ("inconsistent_words", "inconsist"),
+    ("revealed_text", "revealed"),
 ]
 
 

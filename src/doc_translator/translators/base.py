@@ -196,10 +196,7 @@ def translate_independently(translate, units: list[Unit]) -> list[UnitTranslatio
     single call, so the backend can batch and deduplicate.
     """
     texts = [text for unit in units for text in (unit.text, *unit.segments)]
-    # Text without letters (amounts, dates, codes) has nothing to translate,
-    # and the model would reformat it ("1,020" became "1.020" in some table
-    # cells and not in others, "$700" became "$700.").
-    wordy = [text for text in texts if any(c.isalpha() for c in text)]
+    wordy = [text for text in texts if has_words(text)]
     translated = dict(zip(wordy, translate(wordy)))
     translations = iter(translated.get(text, text) for text in texts)
     results = []
@@ -208,6 +205,30 @@ def translate_independently(translate, units: list[Unit]) -> list[UnitTranslatio
         segments = [next(translations) for _ in unit.segments]
         results.append(UnitTranslation(text, segments))
     return results
+
+
+def has_words(text: str) -> bool:
+    """Whether `text` has anything to translate.
+
+    Text without letters (amounts, dates, codes) has not, and an engine
+    would reformat it ("1,020" became "1.020" in some table cells and not in
+    others, "$700" became "$700."). Neither has a value with its units
+    ("1 kΩ", "43~63 Hz", "68 BTU/h", "BNC-F / 75 Ω"): the LLM wrote "1 k"
+    and "1 kcorlib" for "1 kΩ". Words are what is left besides tokens with
+    digits: one of 3 letters or more not in capitals, or a lowercase one of
+    2 ("1 to 13").
+    """
+    if not any(c.isalpha() for c in text):
+        return False
+    if not any(c.isdigit() for c in text):
+        return True
+    words = [
+        word
+        for token in text.split()
+        if not any(c.isdigit() for c in token)
+        for word in re.findall(r"[^\W\d_]+", token)
+    ]
+    return any((len(word) >= 3 and not word.isupper()) or (len(word) == 2 and word.islower()) for word in words)
 
 
 def protect(

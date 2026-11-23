@@ -31,7 +31,23 @@ def read_page(page: pymupdf.Page) -> PageContent:
                     Line(spans, pymupdf.Rect(raw["bbox"]), tuple(raw["dir"]), origins=((b, n),))
                 )
         blocks.append(TextBlock(pymupdf.Rect(block["bbox"]), lines))
+    _mark_hidden([line for block in blocks for line in block.lines], page)
     return PageContent(blocks=blocks, drawings=page.get_drawings(), links=links)
+
+
+def _mark_hidden(lines: list[Line], page: pymupdf.Page) -> None:
+    """Flag the lines an image painted after them covers (the page number
+    under a cover's full-page picture)."""
+    log = page.get_bboxlog()
+    images = [(i, pymupdf.Rect(rect)) for i, (kind, rect) in enumerate(log) if kind == "fill-image"]
+    if not images:
+        return
+    texts = [(i, pymupdf.Rect(rect)) for i, (kind, rect) in enumerate(log) if kind == "fill-text"]
+    for line in lines:
+        painted = [i for i, rect in texts if (rect + (-0.5, -0.5, 0.5, 0.5)).intersects(line.bbox)]
+        if painted:
+            last = max(painted)
+            line.hidden = any(i > last and rect.contains(line.bbox) for i, rect in images)
 
 
 def link_key(link: dict) -> str:

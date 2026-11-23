@@ -311,6 +311,34 @@ def diagram_labels() -> bytes:
     return doc.tobytes()
 
 
+def wide_space() -> bytes:
+    """A paragraph of 8 pt text whose last line ends with a space set in
+    18 pt (ISMUX-004 datasheet, page 2). The space must not set the line
+    spacing: counted, it put the lines 4 pt apart, over each other."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    size = 8
+    page.insert_text((72, 100), "It can also operate as a decompressor or as a compressor, fully configurable and", fontname="hebo", fontsize=size)
+    page.insert_text((72, 110), "compatible with systems from different manufacturers.", fontname="hebo", fontsize=size)
+    end = 72 + pymupdf.get_text_length("compatible with systems from different manufacturers.", fontname="hebo", fontsize=size)
+    page.insert_text((end, 110), " ", fontname="hebo", fontsize=18)
+    page.insert_text((72, 140), "The next paragraph starts here and must stay clear of the one above.", fontname="helv", fontsize=10)
+    return doc.tobytes()
+
+
+def covered_text() -> bytes:
+    """A page number in white under a picture painted after it, as on the
+    ISMUX-004 cover: invisible in the original, it must stay unseen."""
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    page.insert_text((72, 100), "A short paragraph above the picture of the product.", fontname="helv", fontsize=10)
+    page.insert_text((72, 300), "1 | 5", fontname="hebo", fontsize=8, color=(1, 1, 1))
+    picture = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 4, 4), False)
+    picture.set_rect(picture.irect, (128, 128, 128))
+    page.insert_image(pymupdf.Rect(60, 280, 300, 320), pixmap=picture, keep_proportion=False)
+    return doc.tobytes()
+
+
 FIXTURES = {
     "styled_text": styled_text,
     "bordered_table": bordered_table,
@@ -323,6 +351,8 @@ FIXTURES = {
     "ruled_table": ruled_table,
     "toc_leaders": toc_leaders,
     "diagram_labels": diagram_labels,
+    "wide_space": wide_space,
+    "covered_text": covered_text,
 }
 
 

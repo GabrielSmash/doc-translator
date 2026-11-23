@@ -314,7 +314,7 @@ def _last_baseline_limit(
     or at its edge (images, fills). The original last baseline is always
     allowed: the original text fitted there.
     """
-    size = max(s.size for s in paragraph.lines[-1].spans)
+    size = paragraph.lines[-1].size
     own = paragraph.bbox
     descent = DESCENT * size
     limit = _content_area(page_rect, obstacles, own).y1 - descent
@@ -350,7 +350,7 @@ class Obstacle:
         first = block.lines[0]
         if not first.horizontal:
             return cls(block.bbox)
-        return cls(block.bbox, first.baseline, max(s.size for s in first.spans))
+        return cls(block.bbox, first.baseline, first.size)
 
 
 def _containers(paragraph: Block, obstacles: list[Obstacle]) -> list[pymupdf.Rect]:
@@ -486,8 +486,10 @@ def _line_height(paragraph: Block) -> str:
     lines = paragraph.lines
     # CSS applies the factor to each span's own size, and the largest span
     # sets the line's height: the largest of the paragraph is the reference,
-    # or a line holding it would be spaced wider than the original.
-    size = max(s.size for s in paragraph.spans)
+    # or a line holding it would be spaced wider than the original. Spaces
+    # set larger ("manufacturers. " ending in an 18 pt space in 8 pt text)
+    # are not written: counted, they set lines 4 pt apart, over each other.
+    size = max(line.size for line in lines)
     if len(lines) < 2 or size <= 0:
         return "1.2"
     spacing = (lines[-1].baseline - lines[0].baseline) / (len(lines) - 1)
