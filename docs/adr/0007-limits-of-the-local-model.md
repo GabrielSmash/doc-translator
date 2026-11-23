@@ -88,6 +88,23 @@ AGPL-3.0 code cannot use, and it lacks forms like "reinserido".
 - Not covered: agreement ("da cartão", "à adaptador"), wrong sense, wrong
   part of speech. They need a review pass (option C), left for later.
 
+## Revision: invented words from source words; texts in capitals (2026-11-23)
+
+- Named in the last try, an invented word was written again, and naming
+  it could bring it in: "prompção" came back every time it was named,
+  "mensagem" or "prompt" when it was not. An invented word still there
+  that is a source word made to look Portuguese ("prompção" from
+  "prompt", "defaulta" from "default", "reinsertado" from "reinserted":
+  5 letters or more alike from the start) is written as the source word
+  (`Spelling.source_words_for`). Other invented words ("subrede") stay
+  and are reported.
+- Texts in capitals are asked in sentence case, abbreviations and names
+  kept ("DHCP", "EVERTZ"), and answered in capitals: in capitals the
+  model returned "UPGRADING MODULE FIRMWARE THROUGH THE 7700FC FRAME
+  CONTROLLER" as written or wrote "SISTEMA DE MÓDULOS ... CONTROLLER DE
+  FRAME".
+- Manual, LLM engine: invented words 15 -> 7; the heading translated.
+
 ## Revision: titles in sentence case (2026-11-23)
 
 Heading and label style varied run by run and within one diagram ("Status

@@ -29,6 +29,20 @@ def _without_marks(text: str) -> str:
     return re.sub(r"[\u00b2\u00b3\u00b9\u2070-\u209f]", " ", text)
 
 
+# Letters an invented word and a source word must start with alike to be
+# the same word ("promp" of "prompção" and "prompt").
+MIN_STEM = 5
+
+
+def _common_start(a: str, b: str) -> int:
+    length = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        length += 1
+    return length
+
+
 class Spelling:
     def __init__(self, dictionary) -> None:
         self._dictionary = dictionary
@@ -66,6 +80,25 @@ class Spelling:
         """`word` is in the dictionary as written: "blue" is, "ethernet" is
         not (the dictionary has "Ethernet")."""
         return bool(self._dictionary.lookup(word))
+
+    def source_words_for(self, source: str, translation: str, invented: list[str]) -> str:
+        """`translation` with each invented word that is a source word made
+        Portuguese-looking ("prompção" from "prompt", "defaulta" from
+        "default") written as the source word. The model writes these
+        again even when told they do not exist; the term in the source
+        language is a real word, and technical Portuguese uses many of
+        them ("prompt", "default")."""
+        words = {w.lower() for w in WORD.findall(source) if len(w) >= MIN_STEM}
+        for word in invented:
+            lower = word.lower()
+            matches = [w for w in words if _common_start(lower, w) >= max(MIN_STEM, round(0.6 * len(w)))]
+            if not matches:
+                continue
+            original = max(matches, key=lambda w: _common_start(lower, w))
+            if word[0].isupper():
+                original = original.upper() if word.isupper() else original.capitalize()
+            translation = re.sub(rf"(?<!\w){re.escape(word)}(?!\w)", original, translation)
+        return translation
 
     def _exists(self, word: str) -> bool:
         if word not in self._known:

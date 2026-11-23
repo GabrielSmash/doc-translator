@@ -557,3 +557,36 @@ class Lowercase:
 
     def has(self, word):
         return word in self.words
+
+
+def test_capitals_are_asked_in_sentence_case_and_answered_in_capitals():
+    from doc_translator.translators.checks import Vocabulary
+
+    llm = FakeLLM([json.dumps({"translations": ["Atualização do firmware do módulo via DHCP"]})])
+    llm._known = Vocabulary(ordinary=frozenset({"upgrading", "module", "firmware", "through"}))
+    assert llm._asked("UPGRADING MODULE FIRMWARE THROUGH DHCP") == "Upgrading module firmware through DHCP"
+    llm._known = None
+    english = Lowercase({"upgrading", "module", "firmware", "through"})
+    llm._load_source_spelling = lambda: english
+    result = llm.translate_units([Unit("UPGRADING MODULE FIRMWARE THROUGH DHCP")])
+    assert "Upgrading module firmware through DHCP" in llm.prompts[0][-1]["content"]
+    assert result[0].text == "ATUALIZAÇÃO DO FIRMWARE DO MÓDULO VIA DHCP"
+
+
+def test_a_source_word_made_to_look_portuguese_is_written_as_the_source_word():
+    from doc_translator.spelling import Spelling
+
+    spelling = Spelling(None)
+    assert spelling.source_words_for("At the prompt, type:", "Na prompção, digite:", ["prompção"]) == "Na prompt, digite:"
+    # A word not made from a source word is left (still reported).
+    assert spelling.source_words_for("subnet mask", "máscara de subrede", ["subrede"]) == "máscara de subrede"
+
+
+def test_values_with_units_are_not_translated_but_headings_are():
+    from doc_translator.translators.base import has_words
+
+    assert not has_words("1 kΩ")
+    assert not has_words("BNC-F / 75 Ω")
+    assert not has_words("3V3 LVTTL")
+    assert has_words("1 to 13")
+    assert has_words("UPGRADING MODULE FIRMWARE THROUGH THE 7700FC FRAME CONTROLLER")

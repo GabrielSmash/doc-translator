@@ -88,7 +88,10 @@ seen at all.
   the sign back on the right "100".
 - **2026-11-23:** found on the ISMUX-004 datasheet:
   - a value with its units ("1 kΩ", "43~63 Hz") is no longer sent to the
-    engines (`base.has_words`): the LLM wrote "1 k" and "1 kcorlib";
+    engines (`base.has_words`): the LLM wrote "1 k" and "1 kcorlib".
+    Up to two capital words are units or abbreviations ("3V3 LVTTL");
+    more are a heading, translated (the first version left "UPGRADING
+    MODULE FIRMWARE THROUGH THE 7700FC FRAME CONTROLLER" in English);
   - abbreviations are checked like codes (`checks.lost_abbreviations`):
     "BNC Female" became "Conector fêmea", "FEC" became "CORREÇÃO DE
     ERRO". An abbreviation is a capital word of 3 letters or more that is

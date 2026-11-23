@@ -207,6 +207,10 @@ def translate_independently(translate, units: list[Unit]) -> list[UnitTranslatio
     return results
 
 
+# Capital words a value can carry: its units and abbreviations.
+MAX_UNIT_WORDS = 2
+
+
 def has_words(text: str) -> bool:
     """Whether `text` has anything to translate.
 
@@ -216,7 +220,8 @@ def has_words(text: str) -> bool:
     ("1 kΩ", "43~63 Hz", "68 BTU/h", "BNC-F / 75 Ω"): the LLM wrote "1 k"
     and "1 kcorlib" for "1 kΩ". Words are what is left besides tokens with
     digits: one of 3 letters or more not in capitals, or a lowercase one of
-    2 ("1 to 13").
+    2 ("1 to 13"), or more capital words than a value carries ("UPGRADING
+    MODULE FIRMWARE THROUGH THE 7700FC FRAME CONTROLLER").
     """
     if not any(c.isalpha() for c in text):
         return False
@@ -228,7 +233,12 @@ def has_words(text: str) -> bool:
         if not any(c.isdigit() for c in token)
         for word in re.findall(r"[^\W\d_]+", token)
     ]
-    return any((len(word) >= 3 and not word.isupper()) or (len(word) == 2 and word.islower()) for word in words)
+    if any((len(word) >= 3 and not word.isupper()) or (len(word) == 2 and word.islower()) for word in words):
+        return True
+    # Words in capitals are units and abbreviations beside a value ("3V3
+    # LVTTL", "BNC-F / 75 Ω"); several of them are a heading ("UPGRADING
+    # MODULE FIRMWARE THROUGH THE 7700FC FRAME CONTROLLER").
+    return sum(len(word) >= 3 for word in words) > MAX_UNIT_WORDS
 
 
 def protect(

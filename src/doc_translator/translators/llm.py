@@ -344,7 +344,7 @@ class LLMTranslator:
     # -- translation ---------------------------------------------------------
 
     def _translate_batch(self, texts: list[str], context: list[str], glossary: Glossary) -> list[str]:
-        items = json.dumps(texts, ensure_ascii=False, indent=0)
+        items = json.dumps([self._asked(t) for t in texts], ensure_ascii=False, indent=0)
         task = self._format(BATCH_PROMPT, count=len(texts), items=items)
         prompt = self._prompt(task, texts, context, glossary)
         schema = {
@@ -387,6 +387,12 @@ class LLMTranslator:
                     translation = min(
                         [translation, last], key=lambda t: _rank(text, t, glossary, self._known, self._spelling)
                     )
+                # Still there after being named: a source word made to look
+                # Portuguese ("prompção") is written as the source word.
+                if self._spelling and self._known and (
+                    left := self._spelling.unknown(text, translation, self._known.source_words)
+                ):
+                    translation = self._spelling.source_words_for(text, translation, left)
                 if problems := _problems(text, translation, glossary, self._known, self._spelling):
                     log.warning("Check translation of %r (%s): %r", text[:50], problems, translation[:80])
             results.append(translation or text)
@@ -400,7 +406,7 @@ class LLMTranslator:
         missing: list[str] | None = None,
         invented: list[str] | None = None,
     ) -> str:
-        prompt = self._prompt(f"Translate this text:\n{text}", [text], context, glossary)
+        prompt = self._prompt(f"Translate this text:\n{self._asked(text)}", [text], context, glossary)
         if terms := glossary.relevant(text, self.languages.source):
             prompt[0]["content"] += "\n- Mandatory terminology:\n" + terms
         if kept := codes(text) + NUMBER.findall(text):
@@ -422,6 +428,28 @@ class LLMTranslator:
             )
         translation = _clean(self._chat(prompt, max_tokens=64 + len(text)), text)
         return self._match_case(text, translation)
+
+    def _asked(self, text: str) -> str:
+        """`text` as the model is asked to translate it. Capitals are
+        lowered: in capitals the model kept "UPGRADING MODULE FIRMWARE
+        THROUGH THE 7700FC FRAME CONTROLLER" as written, or wrote "SISTEMA
+        DE MÓDULOS ... CONTROLLER DE FRAME"; lowered, it wrote "Atualização
+        do firmware do módulo através do controlador de quadro 7700FC".
+        Abbreviations and names keep their capitals (words that are not
+        words of the language: "DHCP", "EVERTZ"); the answer is put back in
+        capitals (_match_case)."""
+        if not _mostly_upper(text) or self._known is None:
+            return text
+
+        def lower(match: re.Match) -> str:
+            word = match.group(0)
+            return word.lower() if word.lower() in self._known.ordinary else word
+
+        sentence = re.sub(r"[^\W\d_]+", lower, text)
+        first = next((i for i, c in enumerate(sentence) if c.isalpha()), None)
+        if first is None:
+            return text
+        return sentence[:first] + sentence[first].upper() + sentence[first + 1 :]
 
     def _prompt(
         self, task: str, texts: list[str], context: list[str], glossary: Glossary
