@@ -17,6 +17,7 @@ from .classify import (
     screen_part,
 )
 from .graphics import separating_rules
+from .labels import join_stacked_labels
 from .lines import join_pieces, visual_lines
 from .model import Action, Block, Kind, PageContent
 
@@ -34,12 +35,13 @@ def analyze(content: PageContent) -> list[Block]:
     groups = []  # (PyMuPDF block, its lines to translate)
     verticals = [rule for drawing in content.drawings for rule in column_rules(drawing)]
     joined = []
-    for text_block in content.blocks:
+    text_blocks = join_stacked_labels(content.blocks, content.drawings)
+    for text_block in text_blocks:
         pieces = [line for raw in text_block.lines for line in visual_lines(raw, content.links)]
         pieces = [line for line in pieces if line.text.strip()]
         joined.append(join_pieces(pieces, verticals))
     screens = _screens(joined)
-    for text_block, block_lines, screen in zip(content.blocks, joined, screens):
+    for text_block, block_lines, screen in zip(text_blocks, joined, screens):
         lines: list = []
         code: list = []  # consecutive code lines form one block
         if screen:

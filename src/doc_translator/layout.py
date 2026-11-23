@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 import pymupdf
 
 from .align import Run, base_style
+from .analysis.labels import LABEL_WORDS
 from .analysis.model import Block, Leader
 from .fonts import FontLibrary, generic_family
 
@@ -27,9 +28,6 @@ TOLERANCE = 0.5
 # the original), then more before the font is reduced, since a little width
 # is less visible than a smaller font.
 WIDTH_SLACKS = (0.03, 0.10)
-# A paragraph of at most this many words is a label (a diagram's "Processor
-# State LEDs" on two lines): its width says nothing about a column.
-LABEL_WORDS = 4
 # How much wider a label of several lines may get, step by step: as little
 # as keeps it on its lines; `WIDE` is as far as there is room.
 WIDE = math.inf
@@ -169,6 +167,8 @@ def _place(
 
 
 def _is_label(paragraph: Block) -> bool:
+    """A few words (a diagram's "Processor State LEDs" on two lines): its
+    width says nothing about a column."""
     return len(paragraph.text.split()) <= LABEL_WORDS and not paragraph.leader
 
 

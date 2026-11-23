@@ -266,3 +266,25 @@ def test_a_paragraph_cut_by_a_page_break_is_translated_whole():
     pieces = {u.text: t.text for u, t in zip(result.units, result.translations)}
     assert " ".join([pieces["Connect the network by plugging one end of the"], pieces["cable into the receptacle of the card."]]) == whole.upper()
     assert share("aaaa bbbb cccc dddd", [9, 9]) == ["aaaa bbbb", "cccc dddd"]
+
+
+def _block(text: str, x0: float, x1: float, top: float, size: float = 9.6):
+    from doc_translator.analysis.model import Line, Span, TextBlock
+
+    rect = pymupdf.Rect(x0, top, x1, top + size * 1.15)
+    return TextBlock(rect, [Line([Span(text, "ArialMT", size, 0, 0, rect, top + size)], rect)])
+
+
+def test_a_label_stored_as_one_block_per_line_is_joined():
+    from doc_translator.analysis.labels import join_stacked_labels
+
+    # 7700 manual, page 5: "Diagnositic" over "LEDs", centered.
+    label = [_block("Diagnositic", 170, 217, 536), _block("LEDs", 182, 205, 548)]
+    joined = join_stacked_labels(label, [])
+    assert [" ".join(line.text for line in b.lines) for b in joined] == ["Diagnositic LEDs"]
+    # Items of a list or column share an edge: they stay apart.
+    column = [_block("Baud", 150, 175, 100), _block("Parity", 150, 180, 112)]
+    assert len(join_stacked_labels(column, [])) == 2
+    # A rule between two lines makes them cells of a table.
+    rule = {"items": [("l", pymupdf.Point(160, 547.2), pymupdf.Point(230, 547.2))]}
+    assert len(join_stacked_labels(label, [rule])) == 2
