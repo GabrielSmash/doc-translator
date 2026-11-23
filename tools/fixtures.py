@@ -277,6 +277,40 @@ def toc_leaders() -> bytes:
     return doc.tobytes()
 
 
+def diagram_labels() -> bytes:
+    """A block diagram: short labels beside LEDs, arrows and a box (7700
+    manual, page 5). A label of two lines has the LEDs' arrows just below
+    it; labels have the LEDs on their right and free room on their left.
+
+    Labels must not grow across the lines, nor shrink while the diagram has
+    room beside them.
+    """
+    doc = pymupdf.open()
+    page = doc.new_page(width=A4.width, height=A4.height)
+    size = 9.6
+
+    def label(x: float, baseline: float, text: str) -> None:
+        page.insert_text((x, baseline), text, fontname="helv", fontsize=size)
+
+    # The page's text column, as in the manual: the room left of the box.
+    page.insert_text((76, 360), "The block diagram below shows the main parts of the controller.", fontname="helv", fontsize=10)
+    page.draw_rect(pymupdf.Rect(142, 388, 434, 581), width=1.5)
+    label(171, 405, "Processor")
+    label(169, 416, "State LEDs")
+    for y in (421, 435, 449, 463, 492, 506, 520, 534):
+        page.draw_circle((164, y), 4, width=0.5)
+        page.draw_line((170, y), (253, y), width=0.5)
+    page.draw_line((253, 421), (253, 534), width=0.5)
+    for y in (506, 520, 534):
+        page.draw_circle((150, y), 4, width=0.5, dashes="[1] 0")
+    label(111, 509, "Activity")
+    label(118, 521, "Link")
+    label(112, 533, "Speed")
+    page.draw_line((267, 507), (267, 602), width=0.5)
+    label(207, 603, "Frame Status")
+    return doc.tobytes()
+
+
 FIXTURES = {
     "styled_text": styled_text,
     "bordered_table": bordered_table,
@@ -288,6 +322,7 @@ FIXTURES = {
     "split_line": split_line,
     "ruled_table": ruled_table,
     "toc_leaders": toc_leaders,
+    "diagram_labels": diagram_labels,
 }
 
 

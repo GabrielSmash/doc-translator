@@ -27,6 +27,13 @@ TOLERANCE = 0.5
 # the original), then more before the font is reduced, since a little width
 # is less visible than a smaller font.
 WIDTH_SLACKS = (0.03, 0.10)
+# A paragraph of at most this many words is a label (a diagram's "Processor
+# State LEDs" on two lines): its width says nothing about a column.
+LABEL_WORDS = 4
+# How much wider a label of several lines may get, step by step: as little
+# as keeps it on its lines; `WIDE` is as far as there is room.
+WIDE = math.inf
+LABEL_SLACKS = (0.25, 0.5, 1.0, WIDE)
 # Reduced sizes are rounded down to steps of this fraction, and paragraphs of
 # one style on a page share the smallest: text of one kind in one size reads
 # as ordered, mixed sizes side by side as a mess.
@@ -145,7 +152,33 @@ def _place(
         placement = _place_in(page_rect, paragraph, obstacles, fonts, size, slack)
         if placement.scale >= size:
             break
+    # A label (a diagram's) keeps its lines as they were where it can: they
+    # are often stacked on purpose. Where it can't, it grows as far as
+    # there is room, and then the other way, where the diagram is often
+    # empty ("Activity" against its LED, "Frame Status" against an arrow),
+    # rather than shrink or wrap onto more lines.
+    if _is_label(paragraph.source):
+        for other_side in (False, True):
+            for slack in LABEL_SLACKS:
+                if _as_written(placement, size):
+                    return placement
+                other = _place_in(page_rect, paragraph, obstacles, fonts, size, slack, other_side)
+                if _rank(other) > _rank(placement):
+                    placement = other
     return placement
+
+
+def _is_label(paragraph: Block) -> bool:
+    return len(paragraph.text.split()) <= LABEL_WORDS and not paragraph.leader
+
+
+def _as_written(placement: Placement, size: float) -> bool:
+    """Written in the size asked for, on no more lines than the original."""
+    return placement.scale >= size and len(placement.lines) <= len(placement.paragraph.source.lines)
+
+
+def _rank(placement: Placement) -> tuple:
+    return (placement.fitted, round(placement.scale, 2), -len(placement.lines))
 
 
 def _place_in(
@@ -155,9 +188,10 @@ def _place_in(
     fonts: FontLibrary,
     size: float,
     slack: float,
+    other_side: bool = False,
 ) -> Placement:
     source = paragraph.source
-    rect = _available_rect(page_rect, source, obstacles, slack)
+    rect, align = _available_rect(page_rect, source, obstacles, slack, other_side)
     if source.leader:
         # Keep room for a few dots and the page number.
         leader = source.leader
@@ -170,7 +204,7 @@ def _place_in(
     css = (
         f"{fonts.css}\n"
         f"body, p {{ margin: 0; padding: 0; }} "
-        f"p {{ line-height: {_line_height(source)}; text-align: {source.align}; {_indent(source)}}}"
+        f"p {{ line-height: {_line_height(source)}; text-align: {align}; {_indent(source)}}}"
     )
 
     # Write the text in a box as tall as needed, then see where its lines
@@ -191,7 +225,9 @@ def _place_in(
     rect = pymupdf.Rect(rect.x0, top, rect.x1, max(limit, last_baseline) + bottom_part + GAP)
     if last_baseline <= limit + TOLERANCE:
         lines = [WrittenLine(line.rect + (0, shift, 0, shift), line.baseline + shift) for line in measured.lines]
-        return Placement(paragraph, rect, html_text, css, size, fitted=True, lines=lines)
+        # A word wider than the box ("Velocidade" in a 28 pt label) is
+        # written smaller even in a tall box: that is the size it gets.
+        return Placement(paragraph, rect, html_text, css, size * measured.scale, fitted=True, lines=lines)
     # Too long for the room: the HTML engine shrinks it to the allowed height.
     rect.y1 = limit + bottom_part + TOLERANCE
     spare_height, scale, lines = _fit(page_rect, rect, html_text, css, fonts.archive)
@@ -204,6 +240,7 @@ class _Measured:
     last_baseline: float
     bottom: float  # bottom of the written content
     lines: list[WrittenLine]
+    scale: float  # below 1: a word did not fit the box's width
 
 
 def _scratch_page(page_rect: pymupdf.Rect) -> pymupdf.Page:
@@ -219,12 +256,12 @@ def _measure(
 ) -> _Measured | None:
     """Write the paragraph on a scratch page and read where its lines fell."""
     page = _scratch_page(page_rect)
-    spare_height, _ = page.insert_htmlbox(rect, html_text, css=css, archive=archive)
+    spare_height, scale = page.insert_htmlbox(rect, html_text, css=css, archive=archive)
     lines = _written_lines(page)
     if not lines:
         return None
     baselines = [line.baseline for line in lines]
-    return _Measured(baselines[0], max(baselines), rect.y1 - spare_height, lines)
+    return _Measured(baselines[0], max(baselines), rect.y1 - spare_height, lines, scale)
 
 
 def _fit(
@@ -261,6 +298,8 @@ def _written_lines(page: pymupdf.Page) -> list[WrittenLine]:
 # text, so they can't be used as limits.
 ASCENT = 0.8
 DESCENT = 0.25
+# How far below its line's box an underline may be drawn (points).
+UNDERLINE_REACH = 2.0
 
 
 def _last_baseline_limit(
@@ -283,6 +322,9 @@ def _last_baseline_limit(
         limit = min(limit, container.y1 - descent)
     for o in obstacles:
         if o.rect.contains(own) or o.rect == own:
+            continue
+        # A horizontal stroke touching the text is its underline.
+        if o.rect.height < 1.5 and o.rect.y0 <= own.y1 + UNDERLINE_REACH and own.y0 < o.rect.y0:
             continue
         is_below = o.rect.y0 > own.y0 + own.height / 2
         if not (is_below and o.rect.x0 < rect.x1 and o.rect.x1 > rect.x0):
@@ -342,16 +384,24 @@ def _content_area(
 
 
 def _available_rect(
-    page_rect: pymupdf.Rect, paragraph: Block, obstacles: list[Obstacle], slack: float
-) -> pymupdf.Rect:
-    """Grow the paragraph box sideways into the empty space around it.
+    page_rect: pymupdf.Rect,
+    paragraph: Block,
+    obstacles: list[Obstacle],
+    slack: float,
+    other_side: bool = False,
+) -> tuple[pymupdf.Rect, str]:
+    """Grow the paragraph box sideways into the empty space around it;
+    returns the box and the alignment to write in it.
 
     Single-line paragraphs (titles, list items) grow as far as there is
     room, since their width says nothing about the column width: away from
     the side they are aligned to. Longer paragraphs fill their column, so
-    they only get a little slack: a replacement font slightly wider than the
-    original would otherwise wrap their text onto one more line. How far
-    down the text may go is decided by `_last_baseline_limit`.
+    they only get a little slack: a replacement font slightly wider than
+    the original would otherwise wrap their text onto one more line
+    (`WIDE`: no limit). With `other_side`, a label grows toward the side it is aligned
+    to, keeping its other edge: aligned left, it grows left and is written
+    aligned right. How far down the text may go is decided by
+    `_last_baseline_limit`.
     """
     rect = pymupdf.Rect(paragraph.bbox)
     others = [o.rect for o in obstacles if not o.rect.contains(rect) and o.rect != paragraph.bbox]
@@ -371,16 +421,28 @@ def _available_rect(
             left = max(left, o.x1 + GAP)
     room_right = max(0.0, right - rect.x1)
     room_left = max(0.0, rect.x0 - left)
+    align = paragraph.align
     if len(paragraph.lines) > 1:
         room_right, room_left = min(room_right, slack * rect.width), min(room_left, slack * rect.width)
-    if paragraph.align == "right":
+    if other_side:
+        if align == "right":
+            rect.x1 += room_right
+            align = "left"
+        elif align == "center":
+            # Off its center, but on as few lines as the original.
+            rect.x0 -= room_left
+            rect.x1 += room_right
+        else:
+            rect.x0 -= room_left
+            align = "right"
+    elif align == "right":
         rect.x0 -= room_left
-    elif paragraph.align == "center":
+    elif align == "center":
         rect.x0 -= min(room_left, room_right)
         rect.x1 += min(room_left, room_right)
     else:
         rect.x1 += room_right
-    return rect
+    return rect, align
 
 
 def _run_html(run: Run, fonts: FontLibrary, size: float = 1.0) -> str:

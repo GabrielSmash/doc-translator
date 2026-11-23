@@ -89,13 +89,15 @@ MIN_COLUMN_RULE = 8.0
 
 
 def graphic_areas(page: pymupdf.Page) -> list[pymupdf.Rect]:
-    """Images, filled areas and column rules: places translated text must
-    not grow into.
+    """Images, filled areas and rules: places translated text must not grow
+    into.
 
-    Other drawings made only of strokes (horizontal rules, underlines) are
-    left out: text sits between them, and line art is checked separately
-    when grouping lines. Vertical rules are kept: they separate the columns
-    of a table or form, and text growing sideways must stop at them.
+    Drawings made only of strokes are taken by their lines, not their box:
+    the box of a diagram's arrows covers the labels beside them. Vertical
+    rules separate the columns of a table or form, and text growing
+    sideways must stop at them; horizontal ones, a diagram's lines, the
+    rows of a table, stop text growing down. Underlines are horizontal
+    strokes too: layout ignores those touching the text they underline.
     """
     rects = [pymupdf.Rect(info["bbox"]) for info in page.get_image_info()]
     for drawing in page.get_drawings():
@@ -103,8 +105,24 @@ def graphic_areas(page: pymupdf.Page) -> list[pymupdf.Rect]:
         only_strokes = all(item[0] == "l" for item in drawing["items"])
         if not only_strokes and rect.height >= 1.5 and rect.width >= 1.5:
             rects.append(rect)
-        rects += column_rules(drawing)
+        rects += column_rules(drawing) + row_rules(drawing)
     return rects
+
+
+def row_rules(drawing: dict) -> list[pymupdf.Rect]:
+    """Horizontal rules of a drawing: lines, or rectangles thinner than 1.5 pt."""
+    rules = []
+    for item in drawing["items"]:
+        if item[0] == "l":
+            start, end = item[1], item[2]
+            if abs(start.y - end.y) < 1 and abs(start.x - end.x) >= MIN_COLUMN_RULE:
+                y = (start.y + end.y) / 2
+                rules.append(pymupdf.Rect(min(start.x, end.x), y - 0.5, max(start.x, end.x), y + 0.5))
+        elif item[0] == "re":
+            rect = pymupdf.Rect(item[1])
+            if rect.height < 1.5 and rect.width >= MIN_COLUMN_RULE:
+                rules.append(rect)
+    return rules
 
 
 def column_rules(drawing: dict) -> list[pymupdf.Rect]:
