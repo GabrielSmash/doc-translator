@@ -87,9 +87,34 @@ it (9 → 3 after ADRs 0002–0004).
   40 most used.
 - About 40 short requests more per document (about 1 minute on the manual).
 
+## Revision: decisions checked against a second use (2026-11-23)
+
+On the ISMUX-004 datasheet, single answers were wrong and imposed on the
+whole document: "standard" -> "transmissão" (five "STANDARD" cells read
+"TRANSMISSÃO"), "mode" -> "hierárquicos" ("Burst or continuous mode" ->
+"Modo hierárquico"). The model reported a word of another part of the
+sentence. And "Electric Linear", of "KOKUSAI DENKI Electric Linear S/A",
+was translated as a term.
+
+- A domain word is decided in two of its uses, and only when both
+  answers agree (singular or plural, by Portuguese plural endings); when
+  they differ ("porta", "porto"), a third use breaks the tie; otherwise
+  each sentence decides. One or two requests more per word.
+- A recurring term always beside an all-capital word or a company ending
+  ("S/A", "Inc") is part of a name and kept (`terms.name_fragments`).
+- The document's description no longer lists names to keep: the model
+  listed ordinary words ("STANDARD", "Modulation"; "Jumpers" on the
+  manual), and told to keep "STANDARD" while translating it, wrote
+  Spanish ("ESTÁNDAR"). The names the document itself shows to be names
+  (screen items, labels, quoted names; `terms.kept_terms`) are listed
+  with the texts to translate instead, not when deciding the
+  terminology: there they made the model keep "frame".
+
 ## Decisions taken
 
 - **2026-11-18:** the user chose at most 40 words picked by use (not only
   words seen rendered two ways), decided by the model with the document's
   context (not a fixed pt-BR list). A user glossary file already existed
   (`--glossary`).
+- **2026-11-23:** two agreeing uses per word and name pieces kept, chosen
+  by the user.

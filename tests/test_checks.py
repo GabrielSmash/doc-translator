@@ -179,3 +179,30 @@ class Words:
 
     def has(self, word):
         return word in self.words
+
+
+def test_abbreviations_dropped_or_spelled_out_are_found():
+    from doc_translator.translators.base import Unit
+    from doc_translator.translators.checks import lost_abbreviations, vocabulary
+
+    known = vocabulary([Unit("Note that the standard connector is used.")], Words({"note", "standard"}))
+    assert lost_abbreviations("BNC Female", "Conector fêmea", known) == ["BNC"]
+    assert lost_abbreviations("FEC", "CORREÇÃO DE ERRO", known) == ["FEC"]
+    assert lost_abbreviations("BNC Female", "BNC fêmea", known) == []
+    assert lost_abbreviations("Long Beach, CA, USA.", "Long Beach, CA, EUA.", known) == []
+    # Words in capitals are words; codes are checked as codes.
+    assert lost_abbreviations("STANDARD", "PADRÃO", known) == []
+    assert lost_abbreviations("NOTE: DVB-S input", "NOTA: entrada DVB-S", known) == []
+
+
+def test_note_marks_and_addresses_are_not_words():
+    from doc_translator.translators.base import Unit
+    from doc_translator.translators.checks import unchanged_words, vocabulary
+
+    # "rate³" is "rate": left in English.
+    units = [Unit("The bit rate of the stream is set by the operator in the menu.")]
+    known = vocabulary(units)
+    assert unchanged_words("Bit rate³", "Bit rate³", None, known) == ["Bit", "rate"]
+    # A name in an address does not become a word.
+    units = [Unit("Visit www.kokusai-denki.com.br for more information about the products.")]
+    assert "denki" not in vocabulary(units).ordinary

@@ -21,7 +21,13 @@ import urllib.request
 
 from ..languages import EN_PT_BR, LanguagePair
 from ..spelling import Spelling, source_spelling, spelling
-from ..terms import domain_words, kept_terms, quoted_terms, recurring_terms
+from ..terms import (
+    domain_words,
+    kept_terms,
+    name_fragments,
+    quoted_terms,
+    recurring_terms,
+)
 from .base import Glossary, Unit, UnitTranslation, has_words
 from .cache import glossary_id
 from .checks import (
@@ -29,6 +35,7 @@ from .checks import (
     Vocabulary,
     codes,
     leading_source_word,
+    lost_abbreviations,
     missing_tokens,
     token_problems,
     unchanged_words,
@@ -42,6 +49,7 @@ CONTEXT_UNITS = 3  # preceding paragraphs shown as context
 # How much of the document the model reads to describe it: its headings and
 # its opening text, up to this many characters.
 BRIEF_CHARS = 3000
+BRIEF_NAMES = 30  # names of the document listed in the description
 EXAMPLE_CHARS = 160  # usage example shown with each glossary term
 # Batches trade prompt overhead (instructions/context repeated per call)
 # against the cost of a bad answer, which sends the whole batch to retry.
@@ -93,11 +101,14 @@ TERM_LINE = re.compile(r"^\s*[-*\d.]*\s*(.+?)\s*=>\s*(.+?)\s*$")
 
 # Written once per document and shown with every batch: a paragraph alone
 # does not say whether "Setup" is a menu or "frame" a video frame.
+# No list of names to keep: asked for one, the model listed ordinary words
+# ("STANDARD", "Modulation", "Jumpers"), and told to keep "STANDARD" while
+# translating it, wrote Spanish ("ESTÁNDAR"). Names are found in the
+# document itself (terms.kept_terms, quoted and name pieces).
 BRIEF_PROMPT = """Below are the headings and the opening text of a document \
-that will be translated. In at most 5 short lines, in {source}, describe: what \
-the document is and its field; who it is written for; the names that must stay \
-as they are (products, and screens, menus, buttons or fields of the software); \
-the meaning that ambiguous words have in it. No preamble.
+that will be translated. In at most 4 short lines, in {source}, describe: what \
+the document is and its field; who it is written for; the meaning that \
+ambiguous words have in it. No preamble.
 
 {excerpt}"""
 
@@ -134,6 +145,7 @@ class LLMTranslator:
         self._all_layers_on_gpu = True
         self._progress = None
         self._brief = ""
+        self._names = ""
         self._sections: dict[str, str] = {}
         self._known: Vocabulary | None = None
         self._spelling: Spelling | None = None
@@ -155,6 +167,15 @@ class LLMTranslator:
         # Described first: the terminology is decided knowing the field ("card"
         # in a frame is a circuit board).
         self._brief = self._describe(units)
+        # The names the document itself shows to be names (its screens'
+        # items, labels, quoted names), not a list asked of the model: asked,
+        # it listed ordinary words ("STANDARD") and then wrote them in
+        # Spanish. Shown with every batch, they keep "Network Setup" whole.
+        # Only with the texts to translate: shown when deciding the
+        # terminology, they made the model keep "frame" and lose "Frame
+        # Controller" -> "controlador de quadro".
+        if names := [*kept.exact, *kept.keep, *kept.quoted][:BRIEF_NAMES]:
+            self._names = f"Names kept as written ({self.languages.source}): " + ", ".join(names)
         self._spelling = self._load_spelling()
         self._known = vocabulary(units, self._load_source_spelling(), self._spelling)
         glossary = self._build_glossary(units, kept).merged(kept).merged(self.user_glossary)
@@ -244,12 +265,24 @@ class LLMTranslator:
         # keeps it ("card" -> "cartão", "pin" -> KEEP); asked to translate a
         # sentence using it, it writes the field's word ("placa", "pino").
         # One word per request: given a list, the model drops lines.
+        # Decided in two of its uses that agree: asked once, the model
+        # sometimes reports a word of another part of the sentence
+        # ("standard" -> "transmissão", "mode" -> "hierárquicos"), and that
+        # decision is then imposed on the whole document. When two answers
+        # differ ("porta", "porto"), a third use breaks the tie; without two
+        # alike, each sentence decides.
         for word, uses in words.items():
-            if decision := self._word_used(word, uses[0]):
+            decisions = [self._word_used(word, use) for use in uses[:2]]
+            if not _agreed(decisions) and len(uses) > 2:
+                decisions.append(self._word_used(word, uses[2]))
+            if decision := _agreed(decisions):
                 self._read_decisions(f"{word} => {decision}", [word], glossary)
+            else:
+                log.info("Terminology: %r left to each sentence (%s)", word, decisions)
         # The model can't reliably tell UI labels from common terms; the
-        # document can: labels are the terms it puts between quotes.
-        for term in quoted_terms(texts, list(terms)):
+        # document can: labels are the terms it puts between quotes, and
+        # pieces of a company's name sit beside the rest of it.
+        for term in quoted_terms(texts, list(terms)) | name_fragments(texts, list(terms)):
             glossary.terms.pop(term, None)
             if term not in glossary.keep:
                 glossary.keep.append(term)
@@ -338,7 +371,7 @@ class LLMTranslator:
                 # The retry can be worse (left in English where the batch
                 # only missed a glossary term): keep the lesser problem.
                 translation = min(
-                    [translation, retry], key=lambda t: _severity(text, t, glossary, self._known, self._spelling)
+                    [translation, retry], key=lambda t: _rank(text, t, glossary, self._known, self._spelling)
                 )
                 # Retried without knowing what was wrong, a model can drop the
                 # same code again ("RJ45") or translate the same name ("Network
@@ -348,10 +381,11 @@ class LLMTranslator:
                 # And words that do not exist ("reinsertado"): named, the model
                 # writes a real one.
                 invented = self._spelling.unknown(text, translation, self._known.source_words) if self._spelling and self._known else []
-                if (missing := missing_tokens(text, translation) + names) or invented:
+                abbreviations = lost_abbreviations(text, translation, self._known)
+                if (missing := missing_tokens(text, translation) + abbreviations + names) or invented:
                     last = self._translate_one(text, previous, glossary, missing, invented)
                     translation = min(
-                        [translation, last], key=lambda t: _severity(text, t, glossary, self._known, self._spelling)
+                        [translation, last], key=lambda t: _rank(text, t, glossary, self._known, self._spelling)
                     )
                 if problems := _problems(text, translation, glossary, self._known, self._spelling):
                     log.warning("Check translation of %r (%s): %r", text[:50], problems, translation[:80])
@@ -395,6 +429,8 @@ class LLMTranslator:
         parts = []
         if self._brief:
             parts.append(f"About the document (context only):\n{self._brief}")
+        if self._names:
+            parts.append(self._names)
         if terms := glossary.relevant("\n".join(texts), self.languages.source):
             parts.append(f"Glossary:\n{terms}")
         section = self._sections.get(texts[0], "") if texts else ""
@@ -561,6 +597,23 @@ def _problems(
     return _check(source, translation, glossary, known, words)[1]
 
 
+def _rank(
+    source: str,
+    translation: str,
+    glossary: Glossary | None = None,
+    known: Vocabulary | None = None,
+    words: Spelling | None = None,
+) -> tuple[int, bool]:
+    """For choosing between two translations: the severity, then, at the
+    same severity, a lost number or code is worse than an invented word.
+    A batch answer shifted to another item ("The IP address..." given the
+    previous item's translation) loses the item's codes; its retry may
+    only have an odd word ("subrede"), and on a tie the batch answer won."""
+    return _severity(source, translation, glossary, known, words), bool(
+        token_problems(source, translation) or lost_abbreviations(source, translation, known)
+    )
+
+
 def _severity(
     source: str,
     translation: str,
@@ -614,6 +667,8 @@ def _check(
     # than an awkward sentence.
     if problems := token_problems(source, translation):
         return 2, "; ".join(problems)
+    if lost := lost_abbreviations(source, translation, known):
+        return 2, "abbreviations dropped or spelled out: " + ", ".join(lost)
     # Invented words ("RETIFOS", "reinsertado"): as wrong as a changed number.
     source_words = known.source_words if known else frozenset()
     if dictionary and (unknown := dictionary.unknown(source, translation, source_words)):
@@ -699,6 +754,28 @@ def _match_case(source: str, translation: str, dictionary: Spelling | None = Non
         pieces += [translation[end : match.start()], word]
         end = match.end()
     return "".join(pieces) + translation[end:]
+
+
+def _agreed(decisions: list[str]) -> str:
+    """The answer given at least twice (in the singular or the plural), or ""."""
+    for index, decision in enumerate(decisions):
+        if decision and any(_same_word(decision, other) for other in decisions[index + 1 :]):
+            return decision
+    return ""
+
+
+def _same_word(a: str, b: str) -> bool:
+    """The same word, in the singular or the plural ("placa", "placas";
+    "informação", "informações"; "painel", "painéis")."""
+
+    def singular(word: str) -> str:
+        word = word.strip().lower()
+        for plural, ending in (("ões", "ão"), ("ães", "ão"), ("éis", "el"), ("ais", "al"), ("ns", "m"), ("s", "")):
+            if word.endswith(plural):
+                return word[: -len(plural)] + ending
+        return word
+
+    return singular(a) == singular(b)
 
 
 def _title_case(text: str) -> bool:

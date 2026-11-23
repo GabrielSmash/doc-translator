@@ -81,19 +81,25 @@ class Pseudo:
 
     Each word is transformed on its own, so a styled phrase transforms to
     exactly the matching part of its paragraph. Terms the document keeps
-    as written (screen names, labels, "N/A") and codes ("RJ45") stay, as
-    with the real engines.
+    as written (screen names, labels, "N/A"), codes ("RJ45") and words in
+    capitals ("BNC", "NIST": abbreviations) stay, as with the real engines.
     """
 
     ACCENTS = str.maketrans("aeiouAEIOUcC", "áéíóúÁÉÍÓÚçÇ")
     WORD = re.compile(r"[A-Za-z]+")
 
     def translate_units(self, units: list[Unit]) -> list[UnitTranslation]:
+        from doc_translator.languages import EN_PT_BR
+        from doc_translator.spelling import source_spelling
         from doc_translator.terms import kept_terms
-        from doc_translator.translators.checks import CODE
+        from doc_translator.translators.checks import CAPITALS, CODE, vocabulary
 
         kept = kept_terms(units).pattern()
-        self._kept = re.compile("|".join([*([kept.pattern] if kept else []), CODE.pattern]), re.IGNORECASE)
+        known = vocabulary(units, source_spelling(EN_PT_BR))
+        abbreviations = {w for u in units for w in CAPITALS.findall(u.text) if w.lower() not in known.ordinary}
+        patterns = [*([kept.pattern] if kept else []), CODE.pattern]
+        patterns += [rf"(?-i:\b{re.escape(w)}\b)" for w in sorted(abbreviations, key=len, reverse=True)]
+        self._kept = re.compile("|".join(patterns), re.IGNORECASE)
         return [UnitTranslation(self._text(u.text), [self._text(s) for s in u.segments]) for u in units]
 
     def _text(self, text: str) -> str:

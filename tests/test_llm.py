@@ -17,6 +17,7 @@ class FakeLLM(LLMTranslator):
         self.cache_id = "llm|fake"
         self._all_layers_on_gpu = False
         self._brief = ""
+        self._names = ""
         self._sections = {}
         self._tables = {}
         self._table_cells = {}
@@ -197,11 +198,11 @@ def test_domain_words_are_decided_by_translating_a_sentence_using_them():
         "Remove the card from the frame before you change the jumper setting.",
         "Each card reports its status to the controller over the network.",
     ]
+    # Two uses rendered alike ("placa", "placas"): the decision.
     llm = FakeLLM(
         [
             json.dumps({"translation": "Insira a placa no quadro.", "word": "placa"}),
-            # A word the translation does not use is no decision.
-            json.dumps({"translation": "Insira a placa no quadro.", "word": "chassi"}),
+            json.dumps({"translation": "Remova as placas do quadro.", "word": "placas"}),
         ]
     )
     glossary = llm._build_glossary([Unit(t) for t in prose])
@@ -209,7 +210,55 @@ def test_domain_words_are_decided_by_translating_a_sentence_using_them():
     # Asked to translate a sentence where the word names the thing.
     assert "Insert the card into the frame" in llm.prompts[0][0]["content"]
     assert '"card"' in llm.prompts[0][0]["content"]
+    assert "Remove the card from the frame" in llm.prompts[1][0]["content"]
 
+    # Two uses rendered differently ("porta", "porto"): a third breaks the tie.
+    llm = FakeLLM(
+        [
+            json.dumps({"translation": "Insira a placa no quadro.", "word": "placa"}),
+            json.dumps({"translation": "Remova o quadro.", "word": "quadro"}),
+            json.dumps({"translation": "Cada placa informa seu status.", "word": "placa"}),
+        ]
+    )
+    assert llm._build_glossary([Unit(t) for t in prose]).terms == {"card": "placa"}
+    # Three different answers: no decision, each sentence decides.
+    llm = FakeLLM(
+        [
+            json.dumps({"translation": "Insira a placa no quadro.", "word": "placa"}),
+            json.dumps({"translation": "Remova o quadro.", "word": "quadro"}),
+            json.dumps({"translation": "Cada cartão informa seu status.", "word": "cartão"}),
+        ]
+    )
+    assert llm._build_glossary([Unit(t) for t in prose]).terms == {}
+    # A word the translation does not use is no decision.
+    llm = FakeLLM(
+        [
+            json.dumps({"translation": "Insira a placa no quadro.", "word": "chassi"}),
+            json.dumps({"translation": "Remova a placa.", "word": "chassi"}),
+            json.dumps({"translation": "Cada placa informa.", "word": "chassi"}),
+        ]
+    )
+    assert llm._build_glossary([Unit(t) for t in prose]).terms == {}
+
+
+def test_plurals_are_the_same_word():
+    from doc_translator.translators.llm import _same_word
+
+    assert _same_word("informação", "informações")
+    assert _same_word("painel", "painéis")
+    assert not _same_word("porta", "porto")
+
+
+def test_pieces_of_a_company_name_are_kept():
+    from doc_translator.terms import name_fragments
+
+    texts = [
+        "KOKUSAI DENKI Electric Linear S/A",
+        "The method developed by KOKUSAI DENKI Electric Linear allows other equipment.",
+        "Generator with the Function Implementer enabled.",
+        "Used by the Function Implementer only.",
+    ]
+    assert name_fragments(texts, ["Electric Linear", "Function Implementer"]) == {"Electric Linear"}
 
 
 def test_terminology_violation_triggers_retry():
@@ -450,6 +499,23 @@ def test_an_invented_word_is_retried():
     llm.spelling = Spelling(Words({"retifos"}))
     result = llm.translate_units([Unit("Remove the jumpers from the card.")])
     assert result[0].text == "Remova os jumpers da placa."
+
+
+def test_a_lost_code_is_worse_than_an_invented_word():
+    from doc_translator.spelling import Spelling
+
+    source = "The address is taken from the 7700FC configuration information."
+    llm = FakeLLM(
+        [
+            # Shifted: the previous item's translation, without "7700FC".
+            json.dumps({"translations": ["Na solicitação, digite boot upgrade."]}),
+            "O endereço é extraído das informações de subrede do 7700FC.",
+            "O endereço é extraído das informações de subrede do 7700FC.",
+        ]
+    )
+    llm.spelling = Spelling(Words({"subrede"}))
+    result = llm.translate_units([Unit(source)])
+    assert result[0].text == "O endereço é extraído das informações de subrede do 7700FC."
 
 
 def test_a_word_still_invented_is_named_in_the_last_try():

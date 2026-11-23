@@ -38,6 +38,9 @@ class Result:
     pages: list[list[Block]] = field(default_factory=list)  # every block, kept ones too
     units: list[Unit] = field(default_factory=list)
     translations: list[UnitTranslation] = field(default_factory=list)
+    # Indices into units translated as one paragraph (pieces cut by a page
+    # break or a block boundary), one list per paragraph.
+    groups: list[list[int]] = field(default_factory=list)
     translated: list[TranslatedParagraph] = field(default_factory=list)
     fonts: FontLibrary | None = None
     placements: list[Placement] = field(default_factory=list)
@@ -146,7 +149,7 @@ def _translate_document(doc: pymupdf.Document, translator: Translator, result: R
     with result.timed("translate"):
         # A paragraph cut by a page break is translated whole, then shared
         # back between its pieces.
-        groups = _groups(len(paragraphs), continued(paragraphs))
+        groups = result.groups = _groups(len(paragraphs), continued(paragraphs))
         whole = [_joined([result.units[i] for i in group]) for group in groups]
         stripped = [strip_affixes(unit) for unit in whole]
         translations = translator.translate_units([unit for unit, _, _ in stripped])

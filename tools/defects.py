@@ -27,7 +27,7 @@ Checks, and the stage they watch:
   kept in English in some translations and translated in others ("White"
   in "White/Orange" kept, in "White/Green" translated).
 - changed_tokens (translation): a translation whose numbers, codes
-  ("RJ45", "CR2032"), value signs ("Ω", "°") or model control tokens
+  ("RJ45", "CR2032"), abbreviations ("BNC", "FEC"), value signs ("Ω", "°") or model control tokens
   ("<tool_call>") differ from its source after the engine's retries and
   the repairs.
 - left_in_english (translation): a short text returned as written though
@@ -51,6 +51,7 @@ Usage:
 
 import argparse
 import itertools
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -418,14 +419,28 @@ def _changed_form(result) -> list[Finding]:
 
 
 def _changed_tokens(result) -> list[Finding]:
-    from doc_translator.translators.checks import token_problems
+    from doc_translator.languages import EN_PT_BR
+    from doc_translator.spelling import source_spelling
+    from doc_translator.translators.checks import (
+        lost_abbreviations,
+        token_problems,
+        vocabulary,
+    )
 
+    known = vocabulary(result.units, source_spelling(EN_PT_BR))
     page_of = {id(b): index for index, blocks in enumerate(result.pages) for b in blocks}
     found = []
-    for translated, unit, translation in zip(result.translated, result.units, result.translations):
-        if problems := token_problems(unit.text, translation.text):
-            page = page_of.get(id(translated.source), -1) + 1
-            found.append(Finding("changed_tokens", page, unit.text, "; ".join(problems)))
+    # A paragraph cut in pieces is translated whole and shared back by
+    # length: a code can fall in the next piece ("... SDT e" | "PMT) e").
+    for group in result.groups or [[i] for i in range(len(result.units))]:
+        source = " ".join(result.units[i].text for i in group)
+        translation = " ".join(result.translations[i].text for i in group)
+        problems = token_problems(source, translation)
+        if lost := lost_abbreviations(source, translation, known):
+            problems.append("abbreviations lost: " + ", ".join(lost))
+        if problems:
+            page = page_of.get(id(result.translated[group[0]].source), -1) + 1
+            found.append(Finding("changed_tokens", page, source, "; ".join(problems)))
     return found
 
 
@@ -493,7 +508,9 @@ def _restarted_sentences(result) -> list[Finding]:
         source, text = unit.text.strip(), translation.text.strip()
         if translated.source.kind != Kind.PARAGRAPH or not source[:1].islower() or len(source.split()) < 3:
             continue
-        if text[:1].isupper() and text[:1] != source[:1]:
+        # An abbreviation starts with a capital wherever it is ("PMT) e...").
+        first = text.split()[0] if text else ""
+        if text[:1].isupper() and text[:1] != source[:1] and not re.sub(r"\W", "", first).isupper():
             page = page_of.get(id(translated.source), -1) + 1
             found.append(Finding("restarted_sentences", page, source, f"-> {text[:50]!r}"))
     return found

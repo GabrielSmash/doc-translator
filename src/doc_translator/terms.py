@@ -55,7 +55,7 @@ def recurring_terms(
 # sense ("card" as "cartão", "End" as "Fim").
 MAX_DOMAIN_WORDS = 40
 MIN_DOMAIN_SPREAD = 3  # texts using the word
-DOMAIN_EXAMPLES = 2
+DOMAIN_EXAMPLES = 3  # two decide; a third breaks a tie
 MAX_CELL_WORDS = 4
 
 
@@ -259,6 +259,35 @@ def quoted_terms(texts: list[str], terms: list[str]) -> set[str]:
     menus and buttons ('Add/Update Frame'), which stay as the software shows."""
     quoted = {m.group(1).strip().lower() for text in texts for m in QUOTED.finditer(text)}
     return {t for t in terms if t.lower() in quoted}
+
+
+# Words that end a company's name ("KOKUSAI DENKI Electric Linear S/A").
+COMPANY_ENDINGS = ("S/A", "S.A.", "Inc", "Ltd", "LLC", "GmbH", "Corp", "Co.", "Ltda")
+
+
+def name_fragments(texts: list[str], terms: list[str]) -> set[str]:
+    """Terms that are always part of a longer name: beside an all-capital
+    word or a company ending wherever they occur ("Electric Linear" in
+    "KOKUSAI DENKI Electric Linear S/A"). Translated, they broke the name
+    ("KOKUSAI DENKI elétrico linear S/A")."""
+    fragments = set()
+    for term in terms:
+        found = [
+            (text[: m.start()], text[m.end() :])
+            for text in texts
+            for m in re.finditer(rf"(?<!\w){re.escape(term)}(?!\w)", text)
+        ]
+        if found and all(_beside_name(before, after) for before, after in found):
+            fragments.add(term)
+    return fragments
+
+
+def _beside_name(before: str, after: str) -> bool:
+    previous = re.search(r"(\S+) $", before)
+    following = re.match(r" (\S+)", after)
+    if previous and re.fullmatch(r"[A-Z][A-Z0-9&-]{1,}", previous.group(1)):
+        return True
+    return bool(following) and following.group(1).rstrip(".,;:") in {e.rstrip(".") for e in COMPANY_ENDINGS}
 
 
 def _is_prose(text: str) -> bool:

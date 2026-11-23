@@ -86,3 +86,13 @@ seen at all.
   "100ósito" unnoticed. The manual writes the OHM SIGN, U+2126, and the
   check knew only the Greek letter. Both count now, and the repair puts
   the sign back on the right "100".
+- **2026-11-23:** found on the ISMUX-004 datasheet:
+  - a value with its units ("1 kΩ", "43~63 Hz") is no longer sent to the
+    engines (`base.has_words`): the LLM wrote "1 k" and "1 kcorlib";
+  - abbreviations are checked like codes (`checks.lost_abbreviations`):
+    "BNC Female" became "Conector fêmea", "FEC" became "CORREÇÃO DE
+    ERRO". An abbreviation is a capital word of 3 letters or more that is
+    not a word of the source language ("NOTE", "STANDARD" are words); one
+    the target writes its own way ("USA" -> "EUA") counts in that form.
+    Retried at severity 2 and named in the last try, as codes;
+  - pieces of one paragraph are checked together (`Result.groups`).

@@ -25,6 +25,10 @@ MIN_LETTERS = 3
 ABBREVIATION_LETTERS = 4
 
 
+def _without_marks(text: str) -> str:
+    return re.sub(r"[\u00b2\u00b3\u00b9\u2070-\u209f]", " ", text)
+
+
 class Spelling:
     def __init__(self, dictionary) -> None:
         self._dictionary = dictionary
@@ -35,6 +39,8 @@ class Spelling:
         language nor taken from the source: the words of `source`, and
         `source_words`, the lowercase words of the whole document ("jumpers"
         kept from "jumper")."""
+        # Note marks are digits, not letters: "remoto³" is "remoto".
+        source, translation = _without_marks(source), _without_marks(translation)
         written = {w.lower() for w in WORD.findall(source)} | source_words
         written |= {part for w in written for part in w.split("-")}
         found = []

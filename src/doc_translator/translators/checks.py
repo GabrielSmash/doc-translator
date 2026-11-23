@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 
 from ..languages import EN_PT_BR
+from .base import PROTECTED
 
 NUMBER = re.compile(r"\d+(?:[.,/:]\d+)*")
 # Signs that carry a value (units, legal marks): a translation keeps them.
@@ -97,6 +98,30 @@ def missing_tokens(source: str, translation: str) -> list[str]:
     in_codes = {_digits(n) for c in lost for n in NUMBER.findall(c)}
     numbers = [n for n in dict.fromkeys(NUMBER.findall(source)) if _digits(n) in digits - in_codes]
     return lost + numbers
+
+
+# All-capital words of 3 letters or more, standing alone ("BNC", "FEC";
+# "DVB-S" is a code).
+CAPITALS = re.compile(r"(?<![\w\-/])[A-Z]{3,}(?![\w\-/])")
+
+
+def lost_abbreviations(
+    source: str, translation: str, known: "Vocabulary | None", languages=EN_PT_BR
+) -> list[str]:
+    """Abbreviations of `source` missing from `translation`: dropped ("BNC
+    Female" -> "Conector fêmea") or spelled out ("FEC" -> "CORREÇÃO DE
+    ERRO"). Abbreviations are capital words that are not words of the
+    source language ("NOTE", "STANDARD" are), nor of the target ("CA" for
+    "AC" is not checked: two letters)."""
+    if known is None:
+        return []
+    found = [w for w in CAPITALS.findall(source) if w.lower() not in known.ordinary]
+    own = dict(languages.translated_abbreviations)
+    return [
+        w
+        for w in dict.fromkeys(found)
+        if not any(re.search(rf"(?<!\w){re.escape(form)}(?!\w)", translation) for form in (w, own.get(w, w)))
+    ]
 
 
 def model_tokens(source: str, translation: str) -> list[str]:
@@ -235,10 +260,14 @@ def vocabulary(units, dictionary=None, target=None) -> Vocabulary:
     `target`: the target language's (spelling.spelling)."""
     from ..terms import kept_terms
 
-    prose = [u.text for u in units if len(u.text.split()) >= PROSE_WORDS and not FORMULA.search(u.text)]
+    # Addresses are not words: "kokusai-denki.com.br" does not make
+    # "KOKUSAI DENKI" ordinary words.
+    prose = [
+        PROTECTED.sub(" ", u.text) for u in units if len(u.text.split()) >= PROSE_WORDS and not FORMULA.search(u.text)
+    ]
     names = [n for u in units for n in u.names] + kept_terms(units).kept()
     ordinary = {w for text in prose for w in WORD.findall(text) if w.islower()}
-    written = {w.lower() for u in units if not FORMULA.search(u.text) for w in WORD.findall(u.text)}
+    written = {w.lower() for u in units if not FORMULA.search(u.text) for w in WORD.findall(PROTECTED.sub(" ", u.text))}
     if dictionary is not None:
         ordinary |= {w for w in written - ordinary if w.isalpha() and dictionary.has(w)}
     shared = {w for w in ordinary if target.has(w)} if target is not None else set()
@@ -264,7 +293,8 @@ def unchanged_words(
     if known and source.strip(" :.#").lower() in known.names:
         return []
     text = kept.sub(" ", source) if kept else source
-    text = CODE.sub(" ", text)
+    # Note marks are digits: "rate³" is "rate".
+    text = CODE.sub(" ", _without_marks(text))
     text = re.sub(r"\b[A-Z][a-z]{2,3}\.?(?=\s*\d)", " ", text)  # "Aug 01": see localize_dates
     words = [w for w in WORD.findall(text) if not (w.isupper() and len(w) <= ABBREVIATION_LETTERS)]
     if known is None:
@@ -275,6 +305,11 @@ def unchanged_words(
         return []
     # Words of both languages ("64 MB Flash") are not left in English.
     return [w for w in words if w.lower() not in known.shared]
+
+
+def _without_marks(text: str) -> str:
+    """Superscript and subscript digits (note marks: "access³") as spaces."""
+    return re.sub(r"[\u00b2\u00b3\u00b9\u2070-\u209f]", " ", text)
 
 
 def leading_source_word(

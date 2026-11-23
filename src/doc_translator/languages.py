@@ -50,6 +50,9 @@ class LanguagePair:
     # is a word, even where a document only writes it capitalized (a table
     # cell "Blue"), and left untranslated it was not kept as a name.
     source_dictionary: tuple[tuple[str, str], ...] = ()
+    # Abbreviations the target language writes its own way ("USA" ->
+    # "EUA"): not dropped when the translation has them so.
+    translated_abbreviations: tuple[tuple[str, str], ...] = ()
 
     def localize_dates(self, source: str, translation: str) -> str:
         """`translation` with the source's month abbreviations, still written
@@ -117,6 +120,9 @@ Boot Loader => KEEP""",
             ("dic", "f0b1a234bd178bdd01875b2a392a9647f888b8fe879f79c52aae62c2759b3647"),
             ("aff", "c7a8c4d08c29d237880844b1623099f59092602f189be38ce3912e457ff38bc1"),
         )
+    ),
+    translated_abbreviations=(
+        ("USA", "EUA"), ("UN", "ONU"), ("EU", "UE"), ("UK", "RU"), ("AC", "CA"), ("DC", "CC"),
     ),
     month_abbreviations=(
         ("Feb", "Fev"), ("Apr", "Abr"), ("May", "Mai"), ("Aug", "Ago"),
