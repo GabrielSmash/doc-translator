@@ -88,8 +88,25 @@ AGPL-3.0 code cannot use, and it lacks forms like "reinserido".
 - Not covered: agreement ("da cartão", "à adaptador"), wrong sense, wrong
   part of speech. They need a review pass (option C), left for later.
 
+## Revision: titles in sentence case (2026-11-23)
+
+Heading and label style varied run by run and within one diagram ("Status
+do quadro" beside "Comunicação de Quadro"), and an uppercase answer to a
+title-case source was rewritten in title case. Titles and labels are now
+written in sentence case, as Brazilian manuals do (`llm._match_case`):
+
+- a capitalized word of a title-case source's translation is lowercased
+  when the pt-BR dictionary has it in lowercase and it is not from the
+  source ("Comunicação de Quadro" -> "Comunicação de quadro");
+- words from the source keep its casing ("Ethernet", "VistaLINK",
+  "LEDs"); names keep their capital ("Califórnia": the dictionary only has
+  it capitalized); a caption starts again after its colon ("Figura 1:
+  Diagrama de blocos");
+- sentences are left as the model writes them.
+
 ## Decisions taken
 
 - **2026-11-18:** a larger default model was measured (above) and
   rejected by the user's choice of option D.
 - **2026-11-19:** option D, with the VERO dictionary.
+- **2026-11-23:** titles and labels in sentence case, by the user.

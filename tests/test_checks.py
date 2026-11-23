@@ -135,6 +135,10 @@ def test_a_short_text_returned_as_written_is_left_in_english():
     assert unchanged_words("Blue", "Blue", kept, known) == ["Blue"]
     assert unchanged_words("Google Brain", "Google Brain", kept, known) == []
     assert unchanged_words("Ribbon Cable", "Ribbon Cable", kept, known) == []
+    # Words the target language has too are not left untranslated.
+    known = vocabulary([Unit("64 MB Flash"), Unit("Blue")], Words({"flash", "blue"}), Words({"flash"}))
+    assert unchanged_words("64 MB Flash", "64 MB Flash", kept, known) == []
+    assert unchanged_words("Blue", "Blue", kept, known) == ["Blue"]
 
     assert leading_source_word("The Frame MIB allows the user", "The Frame MIB permite que o usuário", kept) == "The"
     assert leading_source_word("Press W if you made an error", "Pressione W se você errou", kept) == ""

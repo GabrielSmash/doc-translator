@@ -155,8 +155,8 @@ class LLMTranslator:
         # Described first: the terminology is decided knowing the field ("card"
         # in a frame is a circuit board).
         self._brief = self._describe(units)
-        self._known = vocabulary(units, self._load_source_spelling())
         self._spelling = self._load_spelling()
+        self._known = vocabulary(units, self._load_source_spelling(), self._spelling)
         glossary = self._build_glossary(units, kept).merged(kept).merged(self.user_glossary)
         for unit in units:
             self._sections.setdefault(unit.text, unit.section)
@@ -436,7 +436,7 @@ class LLMTranslator:
         )
 
     def _match_case(self, source: str, translation: str) -> str:
-        return _match_case(source, translation, self.languages.target_minor_words)
+        return _match_case(source, translation, self._spelling)
 
     # -- Ollama --------------------------------------------------------------
 
@@ -635,43 +635,66 @@ def _mostly_upper(text: str) -> bool:
     return len(letters) > 1 and sum(c.isupper() for c in letters) >= 0.8 * len(letters)
 
 
-def _match_case(
-    source: str, translation: str, minor_words: frozenset[str] = EN_PT_BR.target_minor_words
-) -> str:
-    """Undo case changes the model made (it copies casing from nearby items).
+def _match_case(source: str, translation: str, dictionary: Spelling | None = None) -> str:
+    """Undo case changes the model made, and write titles in sentence case.
 
-    An uppercase translation of a non-uppercase source becomes title case or
-    sentence case, as the source; acronyms found in the source stay uppercase.
+    The model copies casing from nearby items: an uppercase translation of
+    a text that is not uppercase is rewritten. Titles and labels are written
+    in sentence case, as Portuguese does ("Frame Communication" ->
+    "Comunicação do quadro", not "Comunicação de Quadro"). A word keeps
+    its capital when it comes from the source as written ("Ethernet",
+    "VistaLINK"), is an acronym of the source, or is a name: a word the
+    target dictionary only has capitalized ("Califórnia"). Without a
+    dictionary, words of a mixed-case translation keep their case.
     """
     if _mostly_upper(source):
         return translation.upper()
-    if not _mostly_upper(translation):
-        # Glossary renderings are lowercase ("controlador de quadro"); at the
-        # start of a text they must follow the source's capital.
-        first_source = next((c for c in source if c.isalpha()), "")
-        first = next((i for i, c in enumerate(translation) if c.isalpha()), None)
-        if first is not None and first_source.isupper() and translation[first].islower():
-            return translation[:first] + translation[first].upper() + translation[first + 1 :]
-        return translation
-    acronyms = {w for w in re.findall(r"\w+", source) if len(w) > 1 and w.isupper()}
-    source_words = [w for w in re.findall(r"[^\W\d_]+", source) if len(w) > 3]
-    title_case = bool(source_words) and sum(w[0].isupper() for w in source_words) >= 0.6 * len(
-        source_words
-    )
+    upper = _mostly_upper(translation)
+    written = {w.lower(): w for w in re.findall(r"[^\W\d_]+", source)}
+    first_word = re.search(r"[^\W\d_]+", translation)
+    first_start = first_word.start() if first_word else -1
+    title = _title_case(source)
+    # Glossary renderings are lowercase ("controlador de quadro"); at the
+    # start of a text they follow the source's capital.
+    capital = next((c for c in source if c.isalpha()), "").isupper()
 
     def fix(match: re.Match) -> str:
         word = match.group(0)
-        if word in acronyms or not word.isalpha():
-            return word
         lower = word.lower()
-        first = match.start() == first_word_start
-        if first or (title_case and lower not in minor_words):
-            return lower.capitalize()
-        return lower
+        source_word = written.get(lower, lower)
+        # As the source writes it: "VistaLINK", "LED", a capital inside a
+        # sentence. In a title, a capital says nothing ("Card Edge Serial
+        # Port" -> "porta serial").
+        from_source = source_word != lower and not (title and source_word == lower.capitalize())
+        if upper:
+            if from_source:
+                word = source_word
+            elif dictionary is not None and not dictionary.has(lower):
+                word = lower.capitalize()  # a name
+            else:
+                word = lower
+        elif (
+            title
+            and word[0].isupper()
+            and word[1:].islower()
+            and not from_source
+            and dictionary is not None
+            and dictionary.has(lower)
+            # After "Figura 1:" a caption starts again.
+            and not re.search(r"[:.]\s*$", translation[: match.start()])
+        ):
+            word = lower  # "Comunicação de Quadro": a word of the language, capitalized
+        if match.start() == first_start and capital:
+            return word[0].upper() + word[1:]
+        return word
 
-    first_word = re.search(r"[^\W\d_]+", translation)
-    first_word_start = first_word.start() if first_word else -1
-    return re.sub(r"\w+", fix, translation)
+    return re.sub(r"[^\W\d_]+", fix, translation)
+
+
+def _title_case(text: str) -> bool:
+    """Most words of more than 3 letters capitalized ("Frame Communication")."""
+    words = [w for w in re.findall(r"[^\W\d_]+", text) if len(w) > 3]
+    return bool(words) and sum(w[0].isupper() for w in words) >= 0.6 * len(words)
 
 
 # Short texts (headings, labels) vary more in length, but not by a sentence:

@@ -84,6 +84,9 @@ context), and only the colors the running text also writes in lowercase
   pt-BR one (`LanguagePair.source_dictionary`).
 - A short text with a word that is neither is a name, whole ("Google
   Brain", "EVERTZ (2) 7700FC"): "Brain" is a word, but not there.
+- Words the target language has too ("flash", "status", "software",
+  "link") are not left in English: "64 MB Flash" kept is not retried.
+  A false friend kept alone ("Data" for "Dados") is missed.
 - Manual, page 14: the six colors, "6 Condutores" and "Cabo de fita"
   translated.
 - arXiv, fast engine: `left_in_english` 9 → 10, other texts. Found now:
@@ -97,4 +100,4 @@ context), and only the colors the running text also writes in lowercase
 - **2026-11-17:** the three points were decided by the user: the check now
   (not with ADR 0006), months by a table, and the first-word check.
 - **2026-11-23:** the English dictionary, chosen by the user over retrying a
-  batch returned unchanged.
+  batch returned unchanged; words of both languages not counted.

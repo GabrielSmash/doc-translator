@@ -222,13 +222,17 @@ class Vocabulary:
     # Names it shows on screens or keeps ("Netmask", "login"), lowercase: a
     # text that is one of them, whole, is a reference to it.
     names: frozenset[str] = frozenset()
+    # Its words the target language has too, lowercase ("flash", "status",
+    # "software"): kept, they are not left untranslated.
+    shared: frozenset[str] = frozenset()
     # Every word it writes, lowercase: a translation may take one as it is
     # ("jumpers", "broadcast"), and it is no invented word.
     source_words: frozenset[str] = frozenset()
 
 
-def vocabulary(units, dictionary=None) -> Vocabulary:
-    """`dictionary`: the source language's (spelling.source_spelling)."""
+def vocabulary(units, dictionary=None, target=None) -> Vocabulary:
+    """`dictionary`: the source language's (spelling.source_spelling);
+    `target`: the target language's (spelling.spelling)."""
     from ..terms import kept_terms
 
     prose = [u.text for u in units if len(u.text.split()) >= PROSE_WORDS and not FORMULA.search(u.text)]
@@ -237,8 +241,10 @@ def vocabulary(units, dictionary=None) -> Vocabulary:
     written = {w.lower() for u in units if not FORMULA.search(u.text) for w in WORD.findall(u.text)}
     if dictionary is not None:
         ordinary |= {w for w in written - ordinary if w.isalpha() and dictionary.has(w)}
+    shared = {w for w in ordinary if target.has(w)} if target is not None else set()
     return Vocabulary(
         ordinary=frozenset(ordinary),
+        shared=frozenset(shared),
         names=frozenset(n.lower() for n in names),
         source_words=frozenset(w.lower() for u in units for w in WORD.findall(u.text)),
     )
@@ -267,7 +273,8 @@ def unchanged_words(
     # 7700FC"): "Brain" is a word, said of the lab.
     if any(w.lower() not in known.ordinary for w in words):
         return []
-    return words
+    # Words of both languages ("64 MB Flash") are not left in English.
+    return [w for w in words if w.lower() not in known.shared]
 
 
 def leading_source_word(

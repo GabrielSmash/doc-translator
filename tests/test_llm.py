@@ -120,7 +120,7 @@ def test_case_copied_from_neighbors_is_undone():
 
     assert (
         _match_case("Downloading the 7700FC Frame Controller Image", "BAIXANDO A IMAGEM DO 7700FC")
-        == "Baixando a Imagem do 7700FC"
+        == "Baixando a imagem do 7700FC"
     )
     assert _match_case("Viewing the LED status", "VISUALIZANDO O STATUS DO LED") == (
         "Visualizando o status do LED"
@@ -129,6 +129,28 @@ def test_case_copied_from_neighbors_is_undone():
     assert _match_case("7700FC Frame Controller", "controlador de quadro 7700FC") == (
         "Controlador de quadro 7700FC"
     )
+
+
+def test_titles_are_written_in_sentence_case():
+    from doc_translator.translators.llm import _match_case
+
+    portuguese = Lowercase({"comunicação", "de", "da", "do", "a", "quadro", "universidade", "porta", "atualização"})
+    assert _match_case("Frame Communication", "Comunicação de Quadro", portuguese) == "Comunicação de quadro"
+    # Names keep their capital: from the source, or only capitalized in the
+    # dictionary.
+    assert _match_case("Ethernet Port", "Porta Ethernet", portuguese) == "Porta Ethernet"
+    assert _match_case("University of California", "UNIVERSIDADE DA CALIFÓRNIA", portuguese) == (
+        "Universidade da Califórnia"
+    )
+    assert _match_case("Figure 1: Block Diagram", "Figura 1: Diagrama de Blocos", Lowercase({"diagrama", "blocos", "de"})) == (
+        "Figura 1: Diagrama de blocos"
+    )
+    assert _match_case("Card Edge Serial Port", "Porta Serial da Borda", Lowercase({"porta", "serial", "da", "borda"})) == (
+        "Porta serial da borda"
+    )
+    # Sentences are left as written.
+    assert _match_case("the port of the frame", "a Porta do quadro", portuguese) == "a Porta do quadro"
+    assert _match_case("no", "nenhum", portuguese) == "nenhum"
 
 
 def test_number_mismatch_triggers_single_retry():
@@ -449,3 +471,13 @@ def test_a_decision_with_an_invented_word_is_dropped():
     llm._spelling = llm.spelling
     glossary = llm._build_glossary([Unit(t) for t in prose])
     assert "netmask" not in glossary.terms
+
+
+class Lowercase:
+    """A target dictionary that has only the words given, in lowercase."""
+
+    def __init__(self, words):
+        self.words = words
+
+    def has(self, word):
+        return word in self.words

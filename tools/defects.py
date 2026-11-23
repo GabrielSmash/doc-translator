@@ -419,7 +419,7 @@ def _translated_names(result) -> list[Finding]:
 
 def _left_in_english(result) -> list[Finding]:
     from doc_translator.languages import EN_PT_BR
-    from doc_translator.spelling import source_spelling
+    from doc_translator.spelling import source_spelling, spelling
     from doc_translator.terms import kept_terms
     from doc_translator.translators.checks import (
         leading_source_word,
@@ -428,7 +428,7 @@ def _left_in_english(result) -> list[Finding]:
     )
 
     kept = kept_terms(result.units).pattern()
-    known = vocabulary(result.units, source_spelling(EN_PT_BR))
+    known = vocabulary(result.units, source_spelling(EN_PT_BR), spelling(EN_PT_BR))
     page_of = {id(b): index for index, blocks in enumerate(result.pages) for b in blocks}
     found = []
     for translated, unit, translation in zip(result.translated, result.units, result.translations):
