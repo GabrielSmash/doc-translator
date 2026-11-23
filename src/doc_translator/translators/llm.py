@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 
 from ..languages import EN_PT_BR, LanguagePair
-from ..spelling import Spelling, spelling
+from ..spelling import Spelling, source_spelling, spelling
 from ..terms import domain_words, kept_terms, quoted_terms, recurring_terms
 from .base import Glossary, Unit, UnitTranslation
 from .cache import glossary_id
@@ -155,7 +155,7 @@ class LLMTranslator:
         # Described first: the terminology is decided knowing the field ("card"
         # in a frame is a circuit board).
         self._brief = self._describe(units)
-        self._known = vocabulary(units)
+        self._known = vocabulary(units, self._load_source_spelling())
         self._spelling = self._load_spelling()
         glossary = self._build_glossary(units, kept).merged(kept).merged(self.user_glossary)
         for unit in units:
@@ -178,6 +178,9 @@ class LLMTranslator:
 
     def _load_spelling(self) -> Spelling | None:
         return spelling(self.languages)
+
+    def _load_source_spelling(self) -> Spelling | None:
+        return source_spelling(self.languages)
 
     def _translate_all(self, texts: list[str], glossary: Glossary, with_context: bool) -> None:
         """Translate each distinct text once into self._cache (headers and

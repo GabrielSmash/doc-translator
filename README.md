@@ -82,7 +82,10 @@ kept):
   commas allowed), since small models occasionally alter them;
 - implausible lengths (explanations, truncated answers, a heading answered
   with a sentence) are rejected;
-- text coming back in English is retried;
+- text coming back in English is retried; what is an English word is
+  decided by the document's running text and an English dictionary
+  (SCOWL's en_US, from LibreOffice), so a table cell "Blue" is a word, not
+  a name;
 - words that do not exist in Portuguese ("reinsertado") are retried, then
   named to the model; they are looked up in LibreOffice's pt-BR dictionary
   (VERO), downloaded once (~5 MB) on first use;
@@ -152,7 +155,12 @@ uv run pytest --corpus           # also the public corpus (downloads ~3.4 MB onc
 uv run python -m tools.measure   # quality metrics per fixture and engine
 uv run python -m tools.measure --corpus --doc my.pdf --engine identity fast
 uv run python -m tools.defects --doc my.pdf --engine fast   # each defect, where it is
+uv run python -m tools.page my.pdf 5        # one page, with the whole document's context
+uv run python -m tools.page my.pdf 5 --reuse   # again, same translations (layout changes)
 ```
+
+`tools/page.py` writes the page, its translation, both rendered and the
+defects found to `samples/tmp/`.
 
 `tools/measure.py` runs the real pipeline and compares its output with the
 original: text coverage, font reduction, characters left without ink, lost
@@ -184,5 +192,6 @@ runs the tests and uploads the package to PyPI (trusted publishing).
 [Helsinki-NLP/opus-mt-tc-big-en-pt](https://huggingface.co/Helsinki-NLP/opus-mt-tc-big-en-pt),
 licensed CC-BY-4.0. The pt-BR dictionary used to check words is
 LibreOffice's [VERO](https://github.com/LibreOffice/dictionaries/tree/master/pt_BR),
-licensed LGPLv3 or MPL 2.0; it is downloaded, not distributed with this
-package.
+licensed LGPLv3 or MPL 2.0, and the English one is SCOWL's en_US (from the
+same repository), under SCOWL's permissive license; both are downloaded,
+not distributed with this package.

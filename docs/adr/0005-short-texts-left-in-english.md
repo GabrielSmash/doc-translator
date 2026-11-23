@@ -69,7 +69,32 @@ valid answer for codes, names and kept terms. So it is never retried.
 - The identity engine counts every text in `left_in_english`: it returns
   the source. The column only means something for translating engines.
 
+## Revision: an English dictionary decides what is a word (2026-11-23)
+
+Rule 2 missed words a document writes only capitalized, in tables. Table 3
+of the manual came back with "Blue", "Yellow", "Orange" in English and
+"Verde", "Vermelho", "Marrom" translated: the model returned the whole
+table as written (it does so in some runs, with or without the ADR 0006
+context), and only the colors the running text also writes in lowercase
+("green LED") were retried.
+
+- A word the source language's dictionary has in lowercase is a word:
+  SCOWL's en_US Hunspell dictionary (LibreOffice's repository, same pinned
+  commit as VERO; permissive license), downloaded on first use like the
+  pt-BR one (`LanguagePair.source_dictionary`).
+- A short text with a word that is neither is a name, whole ("Google
+  Brain", "EVERTZ (2) 7700FC"): "Brain" is a word, but not there.
+- Manual, page 14: the six colors, "6 Condutores" and "Cabo de fita"
+  translated.
+- arXiv, fast engine: `left_in_english` 9 → 10, other texts. Found now:
+  "Abstract", "Parser" (real). Gone: "Deep-Att + PosUnk", "Luong et al.",
+  "preprint arXiv:..." (false alarms). New false alarms: "Google Brain"
+  ("google" is an English verb) and "Inc., 2015.". A false alarm costs
+  the LLM engine a retry; a retry returned as written is kept (rule 5).
+
 ## Decisions taken
 
 - **2026-11-17:** the three points were decided by the user: the check now
   (not with ADR 0006), months by a table, and the first-word check.
+- **2026-11-23:** the English dictionary, chosen by the user over retrying a
+  batch returned unchanged.

@@ -214,9 +214,10 @@ PROSE_WORDS = 8
 class Vocabulary:
     """What a document tells about its words, for the checks of one text."""
 
-    # Words its running text writes in lowercase: words of its language.
-    # Words it only writes capitalized are names ("Vaswani", "Ethernet");
-    # formulas are left out ("dmodel", "dk").
+    # Words of its language: those its running text writes in lowercase,
+    # and those the language's dictionary has in lowercase ("blue", though
+    # only written "Blue" in a table). Other words written capitalized are
+    # names ("Vaswani", "Ethernet"); formulas are left out ("dmodel", "dk").
     ordinary: frozenset[str] = frozenset()
     # Names it shows on screens or keeps ("Netmask", "login"), lowercase: a
     # text that is one of them, whole, is a reference to it.
@@ -226,13 +227,18 @@ class Vocabulary:
     source_words: frozenset[str] = frozenset()
 
 
-def vocabulary(units) -> Vocabulary:
+def vocabulary(units, dictionary=None) -> Vocabulary:
+    """`dictionary`: the source language's (spelling.source_spelling)."""
     from ..terms import kept_terms
 
     prose = [u.text for u in units if len(u.text.split()) >= PROSE_WORDS and not FORMULA.search(u.text)]
     names = [n for u in units for n in u.names] + kept_terms(units).kept()
+    ordinary = {w for text in prose for w in WORD.findall(text) if w.islower()}
+    written = {w.lower() for u in units if not FORMULA.search(u.text) for w in WORD.findall(u.text)}
+    if dictionary is not None:
+        ordinary |= {w for w in written - ordinary if w.isalpha() and dictionary.has(w)}
     return Vocabulary(
-        ordinary=frozenset(w for text in prose for w in WORD.findall(text) if w.islower()),
+        ordinary=frozenset(ordinary),
         names=frozenset(n.lower() for n in names),
         source_words=frozenset(w.lower() for u in units for w in WORD.findall(u.text)),
     )
@@ -255,7 +261,13 @@ def unchanged_words(
     text = CODE.sub(" ", text)
     text = re.sub(r"\b[A-Z][a-z]{2,3}\.?(?=\s*\d)", " ", text)  # "Aug 01": see localize_dates
     words = [w for w in WORD.findall(text) if not (w.isupper() and len(w) <= ABBREVIATION_LETTERS)]
-    return [w for w in words if known is None or w.lower() in known.ordinary]
+    if known is None:
+        return words
+    # A name among the words makes the text a name ("Google Brain", "EVERTZ
+    # 7700FC"): "Brain" is a word, said of the lab.
+    if any(w.lower() not in known.ordinary for w in words):
+        return []
+    return words
 
 
 def leading_source_word(

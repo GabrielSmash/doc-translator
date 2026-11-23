@@ -13,6 +13,7 @@ from dataclasses import dataclass
 class LanguagePair:
     source: str  # language names as written in the LLM prompts
     target: str
+    source_code: str
     target_code: str  # BCP 47: output file suffix and cache key
     target_speakers: str  # "Brazilian professionals keep these terms in English"
     # Opus-MT: the CTranslate2 conversion on Hugging Face and the token
@@ -45,6 +46,10 @@ class LanguagePair:
     # SHA-256): words a translation has and the language does not were
     # invented by the model ("RETIFOS"). Downloaded on first use.
     target_dictionary: tuple[tuple[str, str], ...] = ()
+    # The same for the source language: a word it has in lowercase ("blue")
+    # is a word, even where a document only writes it capitalized (a table
+    # cell "Blue"), and left untranslated it was not kept as a name.
+    source_dictionary: tuple[tuple[str, str], ...] = ()
 
     def localize_dates(self, source: str, translation: str) -> str:
         """`translation` with the source's month abbreviations, still written
@@ -63,6 +68,7 @@ VERO_COMMIT = "5cf23af85b47be6e398add826da1a02175be4238"
 EN_PT_BR = LanguagePair(
     source="English",
     target="Brazilian Portuguese",
+    source_code="en-US",
     target_code="pt-BR",
     target_speakers="Brazilian",
     # Conversion of Helsinki-NLP/opus-mt-tc-big-en-pt published by this
@@ -102,6 +108,14 @@ Boot Loader => KEEP""",
         for ext, sha256 in (
             ("dic", "a38bfb26b68ece2834e79fe83e48d5792652970ace12db89d1b9674bf9933183"),
             ("aff", "21d8ad2a769a60e17e2b5ea4ef11d4d593a58b9e2a82d642ef82d6a4c5523865"),
+        )
+    ),
+    # SCOWL's en_US dictionary (MIT-like license), from the same commit.
+    source_dictionary=tuple(
+        (f"https://raw.githubusercontent.com/LibreOffice/dictionaries/{VERO_COMMIT}/en/en_US.{ext}", sha256)
+        for ext, sha256 in (
+            ("dic", "f0b1a234bd178bdd01875b2a392a9647f888b8fe879f79c52aae62c2759b3647"),
+            ("aff", "c7a8c4d08c29d237880844b1623099f59092602f189be38ce3912e457ff38bc1"),
         )
     ),
     month_abbreviations=(

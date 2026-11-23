@@ -127,6 +127,14 @@ def test_a_short_text_returned_as_written_is_left_in_english():
     assert unchanged_words("Voltage:", "Voltage:", kept, known) == ["Voltage"]
     assert unchanged_words("Gateway", "Gateway", kept, known) == []
     assert unchanged_words("PE(pos,2i) = sin(pos)", "PE(pos,2i) = sin(pos)", kept) == []
+    # Words the language's dictionary has in lowercase are words, though the
+    # document only writes them capitalized in a table; a name among them
+    # makes the text a name.
+    english = Words({"blue", "brain", "cable"})
+    known = vocabulary([*units, Unit("Blue"), Unit("Ribbon Cable")], english)
+    assert unchanged_words("Blue", "Blue", kept, known) == ["Blue"]
+    assert unchanged_words("Google Brain", "Google Brain", kept, known) == []
+    assert unchanged_words("Ribbon Cable", "Ribbon Cable", kept, known) == []
 
     assert leading_source_word("The Frame MIB allows the user", "The Frame MIB permite que o usuário", kept) == "The"
     assert leading_source_word("Press W if you made an error", "Pressione W se você errou", kept) == ""
@@ -157,3 +165,13 @@ def test_words_the_language_does_not_have_are_found():
     assert spelling.unknown("x", "broadcast", frozenset({"broadcast"})) == []
     # Capitals do not hide a word: looked up in lowercase too.
     assert spelling.unknown("x", "MONITORADAS", frozenset()) == []
+
+
+class Words:
+    """A source-language dictionary that has only the words given."""
+
+    def __init__(self, words):
+        self.words = words
+
+    def has(self, word):
+        return word in self.words

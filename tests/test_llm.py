@@ -30,6 +30,9 @@ class FakeLLM(LLMTranslator):
     def _load_spelling(self):
         return self.spelling
 
+    def _load_source_spelling(self):
+        return None
+
     def _describe(self, units):
         return super()._describe(units) if self.brief is not None else ""
 
