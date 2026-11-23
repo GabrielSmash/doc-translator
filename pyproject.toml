@@ -39,6 +39,10 @@ Model = "https://huggingface.co/gabrielsmash/opus-mt-tc-big-en-pt-ct2-int8"
 
 [project.optional-dependencies]
 gpu = ["nvidia-cublas-cu12"]
+images = [
+    "opencv-python-headless>=5.1.0.95",
+    "rapidocr-onnxruntime>=1.4.4",
+]
 
 [project.scripts]
 doc-translator = "doc_translator:main"

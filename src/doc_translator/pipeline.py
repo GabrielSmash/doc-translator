@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pymupdf
 
+from . import images
 from .align import base_style, paragraph_runs, realign, styled_segments
 from .analysis import Action, Block, Kind, analyze_page
 from .analysis.continued import continued, share
@@ -49,6 +50,8 @@ class Result:
     # (page index -> reason), and the warnings logged during the run.
     failures: dict[int, str] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    # Pages that are images, read by OCR (images.pages.ImagePagesResult).
+    images: object | None = None
 
     def fail(self, index: int, stage: str, error: Exception) -> None:
         self.failures[index] = f"{stage}: {type(error).__name__}: {error}"
@@ -75,11 +78,21 @@ def translate_pdf(source: Path, destination: Path, translator: Translator) -> Re
         raise DocumentError("not a PDF")
     if doc.needs_pass:
         raise DocumentError("the PDF is password-protected")
-    if not any(page.get_text("text").strip() for page in doc):
-        # Scanned pages are images of text: there is nothing to translate
-        # until OCR adds a text layer (e.g. `ocrmypdf`).
-        raise DocumentError("the PDF has no text layer (scanned?); run OCR on it first")
+    pictures = images.image_pages(doc)
+    if pictures and not images.available():
+        # Pages that are images (comics, scans) are read by OCR (ADR 0008).
+        raise DocumentError(
+            f"{len(pictures)} pages are images (scanned? a comic?); "
+            "install the OCR support to translate them: pip install 'doc-translator[images]'"
+        )
+    if not pictures and not any(page.get_text("text").strip() for page in doc):
+        raise DocumentError("the PDF has no text and no page images to read")
     result = translate_document(doc, translator)
+    if pictures:
+        from .images.pages import translate_pages
+
+        with result.timed("images"):
+            result.images = translate_pages(doc, pictures, translator)
     with result.timed("save"):
         save(doc, destination)
     return result

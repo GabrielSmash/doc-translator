@@ -27,6 +27,7 @@ from ..terms import (
     name_fragments,
     quoted_terms,
     recurring_terms,
+    repeated_phrases,
 )
 from .base import Glossary, Unit, UnitTranslation, has_words
 from .cache import glossary_id
@@ -91,6 +92,16 @@ Answer one line per term, in the same order, exactly as in these examples:
 
 Terms, each with an example of use:
 {terms}"""
+# A comic's repeated phrases (ADR 0008): names or words?
+NAMES_PROMPT = """These phrases recur in a comic book's balloons. For each, say \
+whether it is a NAME (of a character, place, team, organization or named \
+thing) or common WORDS.
+Answer one line per phrase, in the same order, as:
+Doctor Doom => NAME
+Secret Formula => WORDS
+
+Phrases, each with an example of use:
+{phrases}"""
 # Single words: see _build_glossary.
 WORDS_PROMPT = """Translate this sentence of a technical document into \
 {target}, using the standard terminology of the document's field:
@@ -111,6 +122,15 @@ the document is and its field; who it is written for; the meaning that \
 ambiguous words have in it. No preamble.
 
 {excerpt}"""
+
+# Balloons read from a comic's pages (ADR 0008).
+COMIC_STYLE = (
+    "The texts are a comic book's speech balloons, thought balloons and narration captions, in "
+    "reading order. Translate speech as natural, colloquial {target} dialogue, as {target} comics "
+    "do: short and lively, keeping exclamations and the tone; captions as narration. Keep the names "
+    "of characters, places and teams as in the original. The texts come from OCR: a letter may be "
+    "misread (\"L MUST\" for \"I MUST\")."
+)
 
 BATCH_PROMPT = """Translate each item of the JSON array below into \
 {target}. Answer with {{"translations": [...]}}: exactly {count} strings, \
@@ -146,6 +166,7 @@ class LLMTranslator:
         self._progress = None
         self._brief = ""
         self._names = ""
+        self._kept_words: set[str] = set()
         self._sections: dict[str, str] = {}
         self._known: Vocabulary | None = None
         self._spelling: Spelling | None = None
@@ -161,12 +182,16 @@ class LLMTranslator:
         self._progress = store
 
     def translate_units(self, units: list[Unit]) -> list[UnitTranslation]:
+        if not units:
+            return []
         # Names of screens and fields, set in italics, shown on screens or
         # quoted by instructions, and abbreviations used as they are ("N/A").
         kept = kept_terms(units, self.languages)
         # Described first: the terminology is decided knowing the field ("card"
         # in a frame is a circuit board).
         self._brief = self._describe(units)
+        if any(unit.kind == "balloon" for unit in units):
+            self._brief = f"{self._format(COMIC_STYLE)}\n{self._brief}"
         # The names the document itself shows to be names (its screens'
         # items, labels, quoted names), not a list asked of the model: asked,
         # it listed ordinary words ("STANDARD") and then wrote them in
@@ -179,6 +204,8 @@ class LLMTranslator:
         self._spelling = self._load_spelling()
         self._known = vocabulary(units, self._load_source_spelling(), self._spelling)
         glossary = self._build_glossary(units, kept).merged(kept).merged(self.user_glossary)
+        # Words of kept names are asked capitalized (_asked).
+        self._kept_words = {w.lower() for name in glossary.kept() for w in re.findall(r"[^\W\d_]+", name)}
         for unit in units:
             self._sections.setdefault(unit.text, unit.section)
             if unit.table:
@@ -254,9 +281,10 @@ class LLMTranslator:
         domain word ("card", "jumper") is rendered (ADR 0006)."""
         texts = [u.text for u in units]
         terms = recurring_terms(texts, self.languages.source_stopwords)
+        comic_names = self._comic_names(texts) if any(unit.kind == "balloon" for unit in units) else []
         decided = [*(kept.kept() if kept else []), *self.user_glossary.kept(), *self.user_glossary.terms]
         words = domain_words(units, self.languages, exclude=[*decided, *terms])
-        glossary = Glossary()
+        glossary = Glossary(keep=list(comic_names))
         if terms:
             listing = "\n".join(f'- {term} (e.g. "{_excerpt(example, term)}")' for term, example in terms.items())
             answer = self._ask_terminology(self._format(TERMS_PROMPT, terms=listing), len(terms))
@@ -295,6 +323,25 @@ class LLMTranslator:
                     del glossary.terms[term]
         log.info("Terminology: keep %s; translate %s", glossary.keep, glossary.terms)
         return glossary
+
+    def _comic_names(self, texts: list[str]) -> list[str]:
+        """The phrases of a comic that are names, kept as in the original
+        (ADR 0008). In capitals, case tells nothing: candidates are found
+        by repetition ("DOCTOR OCTOPUS", but also "ARTIFICIAL ARMS"), and the
+        model says which are names. Asked how to render them, it translated
+        names ("Dr. Ocupo")."""
+        candidates = repeated_phrases(texts, self.languages.source_stopwords)
+        if not candidates:
+            return []
+        listing = "\n".join(f'- {phrase} (e.g. "{_excerpt(example.title(), phrase)}")' for phrase, example in candidates.items())
+        answer = self._ask_terminology(self._format(NAMES_PROMPT, phrases=listing), len(candidates))
+        names = []
+        for line in answer.splitlines():
+            if (match := TERM_LINE.match(line)) and match.group(2).strip("\"'` *").upper() == "NAME":
+                phrase = match.group(1).strip("\"'`* -")
+                names += [c for c in candidates if c.lower() == phrase.lower()]
+        log.info("Names kept: %s", names)
+        return names
 
     def _word_used(self, word: str, sentence: str) -> str:
         task = self._format(WORDS_PROMPT, sentence=sentence, word=word)
@@ -443,6 +490,10 @@ class LLMTranslator:
 
         def lower(match: re.Match) -> str:
             word = match.group(0)
+            # Words of a kept name are a name's: "Doctor Octopus", not
+            # "doctor octopus" (which the model translated "Dr. Aranha").
+            if word.lower() in self._kept_words:
+                return word.capitalize()
             return word.lower() if word.lower() in self._known.ordinary else word
 
         sentence = re.sub(r"[^\W\d_]+", lower, text)

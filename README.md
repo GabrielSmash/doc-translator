@@ -114,6 +114,23 @@ uv tool install 'doc-translator[gpu]'   # with the CUDA libraries CTranslate2 ne
 uv sync --extra gpu                     # the same, from the source
 ```
 
+### Comics and scanned pages
+
+Pages that are images (a comic book, a scanned page) are read by OCR and
+written again: balloons and captions are found, their letters painted
+over with the balloon's color, and the translation lettered inside them
+in Comic Neue. It needs the optional OCR support:
+
+```bash
+uv tool install 'doc-translator[images]'   # RapidOCR and OpenCV (CPU)
+uv sync --extra images                     # the same, from the source
+```
+
+With the LLM engine, balloons are translated as colloquial dialogue, in
+reading order (panel by panel), and the names of characters and places
+stay as in the original. Titles and sound effects drawn over the art are
+left as they are.
+
 ## How it works
 
 ```text
@@ -143,9 +160,10 @@ draw     → original text removed, translations written, links recreated
   leaders of a form (". . . . ."), which stay in place.
 - Formulas are flattened: sub and superscripts inside them are not kept.
 - Monospaced text (code, terminal output) is not translated.
-- Scanned PDFs (images without text) are not supported: run OCR on them first
-  (e.g. [OCRmyPDF](https://ocrmypdf.readthedocs.io)). Password-protected PDFs
-  are refused too.
+- On pages that are images, only text on a flat color (balloons,
+  captions) is translated; text over a drawing or a photo stays. OCR
+  misreadings ("L MUST" for "I MUST") can reach the translation.
+  Password-protected PDFs are refused.
 
 ## Development
 
@@ -190,7 +208,8 @@ runs the tests and uploads the package to PyPI (trusted publishing).
 
 [AGPL-3.0-or-later](LICENSE). The `fast` engine's model is a conversion of
 [Helsinki-NLP/opus-mt-tc-big-en-pt](https://huggingface.co/Helsinki-NLP/opus-mt-tc-big-en-pt),
-licensed CC-BY-4.0. The pt-BR dictionary used to check words is
+licensed CC-BY-4.0. The comic lettering font, Comic Neue, is licensed
+under the SIL Open Font License 1.1 (`src/doc_translator/images/fonts/OFL.txt`). The pt-BR dictionary used to check words is
 LibreOffice's [VERO](https://github.com/LibreOffice/dictionaries/tree/master/pt_BR),
 licensed LGPLv3 or MPL 2.0, and the English one is SCOWL's en_US (from the
 same repository), under SCOWL's permissive license; both are downloaded,

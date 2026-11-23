@@ -39,6 +39,9 @@ class Unit:
     names: list[str] = field(default_factory=list)
     # The whole table a cell belongs to, one row per line (context).
     table: str = ""
+    # "balloon": a comic's speech, thought or caption, read from an image
+    # (ADR 0008).
+    kind: str = ""
 
 
 @dataclass

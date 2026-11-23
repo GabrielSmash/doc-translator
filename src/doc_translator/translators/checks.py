@@ -101,8 +101,9 @@ def missing_tokens(source: str, translation: str) -> list[str]:
 
 
 # All-capital words of 3 letters or more, standing alone ("BNC", "FEC";
+# "ISN" of "ISN'T" is no word;
 # "DVB-S" is a code).
-CAPITALS = re.compile(r"(?<![\w\-/])[A-Z]{3,}(?![\w\-/])")
+CAPITALS = re.compile(r"(?<![\w\-/'’])[A-Z]{3,}(?![\w\-/'’])")
 
 
 def lost_abbreviations(

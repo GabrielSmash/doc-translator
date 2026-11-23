@@ -19,6 +19,46 @@ MAX_TERMS = 40
 MAX_TERM_WORDS = 3
 
 
+# Words this common are no part of a name, and win a tie when the OCR's
+# spaces are put back ("IN THE", not "INT HE").
+COMMON = frozenset({
+    "the", "of", "to", "in", "and", "a", "i", "he", "she", "we", "they", "me", "him", "her", "them", "us",
+    "my", "his", "our", "their", "too", "no", "not", "all", "any", "one", "some", "now", "up", "out",
+    "what", "who", "how", "why", "here", "there", "rest", "way", "time", "but", "for", "off", "own",
+})
+# Titles before a name ("DR. OCTOPUS", "AUNT MAY").
+TITLES = r"(?:DR|MR|MRS|MS|PROF|PROFESSOR|CAPTAIN|CAPT|AUNT|UNCLE|SIR|LADY|MISS)"
+MIN_REPEATS = 2
+
+
+def repeated_phrases(texts: list[str], stopwords: frozenset[str] = EN_PT_BR.source_stopwords) -> dict[str, str]:
+    """Candidate names of a text in capitals (a comic's balloons, ADR 0008),
+    where case tells nothing: a title before a word ("DR. OCTOPUS"), and 2
+    or 3 uncommon words that come back together ("DOCTOR OCTOPUS", but
+    also "ARTIFICIAL ARMS"). The model decides which are names, as for
+    recurring terms. Returns {Title Case phrase: an example}."""
+    common = COMMON | stopwords
+    counts: dict[str, int] = {}
+    examples: dict[str, str] = {}
+    for text in texts:
+        seen = set()
+        for match in re.finditer(rf"\b{TITLES}\. ?[A-Z][A-Z']+(?:-[A-Z]+)?\b", text):
+            seen.add(match.group(0))
+            counts[match.group(0)] = counts.get(match.group(0), 0) + MIN_REPEATS - 1
+        words = re.findall(r"[A-Z][A-Z'-]*[A-Z]", text)
+        for size in (3, 2):
+            for start in range(len(words) - size + 1):
+                group = words[start : start + size]
+                phrase = " ".join(group)
+                if any(w.lower() in common or len(w) < 3 for w in group) or phrase not in text:
+                    continue
+                seen.add(phrase)
+        for phrase in seen:
+            counts[phrase] = counts.get(phrase, 0) + 1
+            examples.setdefault(phrase, text)
+    return {p.title(): examples[p] for p, count in counts.items() if count >= MIN_REPEATS}
+
+
 def recurring_terms(
     texts: list[str], stopwords: frozenset[str] = EN_PT_BR.source_stopwords
 ) -> dict[str, str]:

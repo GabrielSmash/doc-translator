@@ -18,6 +18,7 @@ class FakeLLM(LLMTranslator):
         self._all_layers_on_gpu = False
         self._brief = ""
         self._names = ""
+        self._kept_words = set()
         self._sections = {}
         self._tables = {}
         self._table_cells = {}
@@ -590,3 +591,15 @@ def test_values_with_units_are_not_translated_but_headings_are():
     assert not has_words("3V3 LVTTL")
     assert has_words("1 to 13")
     assert has_words("UPGRADING MODULE FIRMWARE THROUGH THE 7700FC FRAME CONTROLLER")
+
+
+def test_a_comics_names_are_kept_and_its_common_phrases_left():
+    llm = FakeLLM(["Doctor Octopus => NAME\nArtificial Arms => WORDS"])
+    texts = [
+        "DOCTOR OCTOPUS IS STILL BREATHING!",
+        "NO ONE CAN HOLD DOCTOR OCTOPUS!",
+        "WE CAN'T REMOVE THOSE ARTIFICIAL ARMS!",
+        "THE ARTIFICIAL ARMS ADHERE TO HIM!",
+    ]
+    assert llm._comic_names(texts) == ["Doctor Octopus"]
+    assert "Artificial Arms" in llm.prompts[0][0]["content"]

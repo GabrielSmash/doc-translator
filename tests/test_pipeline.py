@@ -142,13 +142,13 @@ def test_page_failing_to_read_is_kept_and_reported(monkeypatch):
 
 
 def test_unusable_documents_are_refused(tmp_path):
-    scanned = pymupdf.open()
-    scanned.new_page()
-    scanned.save(tmp_path / "scanned.pdf")
+    empty = pymupdf.open()
+    empty.new_page()
+    empty.save(tmp_path / "empty.pdf")
     (tmp_path / "text.pdf").write_text("not a pdf")
 
-    with pytest.raises(DocumentError, match="no text layer"):
-        translate_pdf(tmp_path / "scanned.pdf", tmp_path / "out.pdf", Counting())
+    with pytest.raises(DocumentError, match="no text and no page images"):
+        translate_pdf(tmp_path / "empty.pdf", tmp_path / "out.pdf", Counting())
     with pytest.raises(DocumentError):
         translate_pdf(tmp_path / "text.pdf", tmp_path / "out.pdf", Counting())
 
