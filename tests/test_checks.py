@@ -42,7 +42,7 @@ def test_reordered_and_reformatted_numbers_are_left_alone():
 def test_the_pipeline_repairs_what_the_engine_left_wrong():
     import pymupdf
 
-    from doc_translator.pipeline import translate_document
+    from doc_translator.modes.document import translate_document
     from doc_translator.translators.base import UnitTranslation
 
     class Garbles:

@@ -7,7 +7,8 @@ from huggingface_hub import snapshot_download
 from huggingface_hub.errors import HfHubHTTPError, LocalEntryNotFoundError
 
 from .languages import EN_PT_BR
-from .pipeline import DocumentError, translate_pdf
+from .modes import AUTO, MODES, choose
+from .pipeline import DocumentError, open_pdf, translate
 from .report import Report
 from .translators.base import Glossary
 from .translators.cache import CachedTranslator, TranslationCache, default_path
@@ -15,7 +16,7 @@ from .translators.llm import DEFAULT_HOST, LLMError, LLMTranslator
 from .translators.opus import OpusTranslator
 
 LANGUAGES = EN_PT_BR
-DEFAULT_LLM = "qwen3:4b-instruct"
+log = logging.getLogger("doc_translator")
 
 
 def main() -> None:
@@ -26,14 +27,34 @@ def main() -> None:
     parser.add_argument("input", type=Path, help="PDF to translate")
     parser.add_argument("-o", "--output", type=Path, help=f"default: <input>.{LANGUAGES.target_code}.pdf")
     parser.add_argument(
+        "--mode",
+        choices=[AUTO, *MODES],
+        default=AUTO,
+        help="document: a PDF with text, its layout kept; comic: pages that are images, "
+        "balloons read by OCR and lettered again; auto: by the pages",
+    )
+    parser.add_argument(
         "--engine",
         choices=["fast", "llm"],
-        default="fast",
         help="fast: Opus-MT, sentence by sentence; llm: local LLM via Ollama, "
-        "context-aware and slower",
+        "context-aware and slower (default: "
+        + ", ".join(f"{m.engine} for a {m.name}" for m in MODES.values())
+        + ")",
     )
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
-    parser.add_argument("--llm-model", default=DEFAULT_LLM, help="Ollama model (llm engine)")
+    parser.add_argument(
+        "--llm-model",
+        help="Ollama model (llm engine; default: "
+        + ", ".join(f"{m.llm_model} for a {m.name}" for m in MODES.values())
+        + ")",
+    )
+    parser.add_argument(
+        "--context",
+        default="",
+        metavar="TEXT",
+        help='what the document is about, for the llm engine ("Spider-Man comic; '
+        'Doctor Octopus has four mechanical arms")',
+    )
     parser.add_argument("--ollama-host", default=DEFAULT_HOST)
     parser.add_argument(
         "--glossary",
@@ -61,15 +82,25 @@ def main() -> None:
     if not args.input.is_file():
         sys.exit(f"error: {args.input} not found")
     output = args.output or args.input.with_suffix(f".{LANGUAGES.target_code}.pdf")
+    try:
+        doc = open_pdf(args.input)
+        mode = choose(doc, args.mode)
+    except DocumentError as error:
+        sys.exit(f"error: {args.input}: {error}")
+    engine = args.engine or mode.engine
+    if args.context and engine != "llm":
+        sys.exit("error: --context is read by the llm engine only (--engine llm)")
     glossary = None
     if args.glossary:
         try:
             glossary = Glossary.load(args.glossary)
         except (OSError, ValueError) as error:
             sys.exit(f"error: invalid glossary {args.glossary}: {error}")
-    if args.engine == "llm":
+    if engine == "llm":
         try:
-            translator = LLMTranslator(args.llm_model, args.ollama_host, glossary, LANGUAGES)
+            translator = LLMTranslator(
+                args.llm_model or mode.llm_model, args.ollama_host, glossary, LANGUAGES, args.context
+            )
         except LLMError as error:
             sys.exit(f"error: {error}")
     else:
@@ -80,7 +111,8 @@ def main() -> None:
     if not args.no_cache:
         translator = CachedTranslator(translator, TranslationCache(default_path()))
     try:
-        result = translate_pdf(args.input, output, translator)
+        log.info("Translating as a %s with the %s engine", mode.name, engine)
+        result = translate(doc, output, translator, mode)
     except (LLMError, KeyboardInterrupt) as error:
         reason = "interrupted" if isinstance(error, KeyboardInterrupt) else f"error: {error}"
         resume = "" if args.no_cache else "\nParagraphs already translated were saved; run again to resume."

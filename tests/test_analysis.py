@@ -242,7 +242,7 @@ def test_prose_with_numbered_items_is_not_a_screen():
 
 def test_a_paragraph_cut_by_a_page_break_is_translated_whole():
     from doc_translator.analysis.continued import share
-    from doc_translator.pipeline import translate_document
+    from doc_translator.modes.document import translate_document
     from doc_translator.translators.base import UnitTranslation
 
     doc = pymupdf.open()

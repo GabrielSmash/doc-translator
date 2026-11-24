@@ -24,7 +24,7 @@ from pathlib import Path
 
 import pymupdf
 
-from doc_translator.pipeline import translate_document
+from doc_translator.modes.document import translate_document
 from doc_translator.translators.base import Unit, UnitTranslation
 from tools.defects import find
 from tools.measure import make_engine

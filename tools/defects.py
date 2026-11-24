@@ -520,7 +520,7 @@ def _restarted_sentences(result) -> list[Finding]:
 
 
 def main() -> None:
-    from doc_translator.pipeline import translate_document
+    from doc_translator.modes.document import translate_document
     from tools.measure import make_engine
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)

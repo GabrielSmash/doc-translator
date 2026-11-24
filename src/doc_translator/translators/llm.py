@@ -13,6 +13,7 @@ Answers are requested as JSON (Ollama structured outputs) and validated;
 anything that doesn't check out is retried one paragraph at a time.
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -158,8 +159,13 @@ class LLMTranslator:
         host: str = DEFAULT_HOST,
         glossary: Glossary | None = None,
         languages: LanguagePair = EN_PT_BR,
+        context: str = "",
     ) -> None:
         self.model = model
+        # What the user says about the document ("Doctor Octopus has four
+        # mechanical arms"): read before describing it, and shown with every
+        # prompt.
+        self.user_context = " ".join(context.split())
         self.languages = languages
         self.host = host.rstrip("/")
         self.user_glossary = glossary or Glossary()
@@ -183,6 +189,8 @@ class LLMTranslator:
         digest = self._check_model()
         # The digest changes when `ollama pull` brings a new version.
         self.cache_id = f"llm|{model}|{digest}|{languages.target_code}|{glossary_id(glossary)}"
+        if self.user_context:
+            self.cache_id += "|" + hashlib.sha256(self.user_context.encode()).hexdigest()[:16]
 
     def keep_progress(self, store) -> None:
         """Save each translated batch to `store` (a cache namespace) and
@@ -274,6 +282,8 @@ class LLMTranslator:
         excerpt = "Headings:\n" + "\n".join(headings) + "\n\nText:\n"
         excerpt += "\n".join(u.text for u in units if u.text not in headings)
         excerpt = excerpt[:BRIEF_CHARS]
+        if self.user_context:
+            excerpt = f"Said by the user who asked for the translation:\n{self.user_context}\n\n{excerpt}"
         try:
             brief = self._chat(
                 [{"role": "user", "content": self._format(BRIEF_PROMPT, excerpt=excerpt)}],
@@ -281,9 +291,14 @@ class LLMTranslator:
             )
         except LLMError as error:
             log.warning("Could not describe the document (%s); continuing without it", error)
-            return ""
+            return self._with_user_context("")
         log.info("Document: %s", " ".join(brief.split()))
-        return brief.strip()
+        return self._with_user_context(brief.strip())
+
+    def _with_user_context(self, brief: str) -> str:
+        if not self.user_context:
+            return brief
+        return f"From the user (follow it): {self.user_context}\n{brief}".strip()
 
     # -- glossary ------------------------------------------------------------
 

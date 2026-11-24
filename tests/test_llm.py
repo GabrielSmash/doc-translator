@@ -15,6 +15,7 @@ class FakeLLM(LLMTranslator):
         self._cache = {}
         self._progress = None
         self.cache_id = "llm|fake"
+        self.user_context = ""
         self._all_layers_on_gpu = False
         self._brief = ""
         self._names = ""
@@ -317,6 +318,16 @@ def test_prompts_carry_the_document_brief_and_the_section():
     user = llm.prompts[1][1]["content"]
     assert "A manual for a video frame controller." in user
     assert "Section: Upgrading the Firmware" in user
+
+
+def test_what_the_user_says_about_the_document_is_read_and_followed():
+    llm = FakeLLM(["A comic book.", json.dumps({"translations": ["Meus braços!"]})])
+    llm.brief = True
+    llm.user_context = "Doctor Octopus has four mechanical arms."
+    llm.translate_units([Unit("My arms!", kind="balloon")])
+    describe, translate = (prompt[-1]["content"] for prompt in llm.prompts)
+    assert "Doctor Octopus has four mechanical arms." in describe
+    assert "From the user (follow it): Doctor Octopus has four mechanical arms." in translate
 
 
 def test_italic_labels_that_recur_stay_untranslated():

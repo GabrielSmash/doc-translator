@@ -36,11 +36,13 @@ and cached.
 | Option | Description |
 |---|---|
 | `-o FILE` | output path |
-| `--engine fast\|llm` | translation engine (see above) |
+| `--mode auto\|document\|comic` | the process: `document` keeps a text PDF's layout, `comic` reads page images by OCR (see below); `auto` chooses by the pages |
+| `--engine fast\|llm` | translation engine (see above); default `fast` for a document, `llm` for a comic |
+| `--context TEXT` | `llm` engine: what the document is about, read before translating it ("Spider-Man comic; Doctor Octopus has four mechanical arms") |
 | `--glossary FILE` | your terminology, for both engines (see below) |
 | `--device auto\|cpu\|cuda` | `fast` engine: `auto` uses the GPU when available |
 | `--model DIR` | `fast` engine: local CTranslate2 model instead of downloading one |
-| `--llm-model NAME` | `llm` engine: Ollama model (default `qwen3:4b-instruct`) |
+| `--llm-model NAME` | `llm` engine: Ollama model (default `qwen3:4b-instruct` for a document, `qwen3:8b` for a comic) |
 | `--ollama-host URL` | `llm` engine: Ollama server (default `http://localhost:11434`) |
 | `--report FILE` | write what the run changed (per page, fonts, warnings) as JSON |
 | `--no-cache` | translate everything again instead of reusing earlier translations |
@@ -126,10 +128,22 @@ uv tool install 'doc-translator[images]'   # RapidOCR and OpenCV (CPU)
 uv sync --extra images                     # the same, from the source
 ```
 
-With the LLM engine, balloons are translated as colloquial dialogue, in
-reading order (panel by panel), and the names of characters and places
-stay as in the original. Titles and sound effects drawn over the art are
-left as they are.
+A PDF whose pages are images and have no text goes to this process
+(`--mode comic` chooses it). Its defaults differ from a document's: the
+LLM engine with `qwen3:8b`, which follows a story where the 4b model loses
+it ("arms" written as "pernas"), at the cost of time: about 40 minutes for
+a 25-page comic on a 4 GB GPU ([ADR 0009](docs/adr/0009-a-process-per-kind-of-document.md)).
+
+```bash
+ollama pull qwen3:8b
+doc-translator comic.pdf --context "Spider-Man comic; Doctor Octopus has four mechanical arms"
+```
+
+Balloons are translated as colloquial dialogue, in reading order (panel
+by panel), each seeing about two pages before it and the balloons after;
+the names of characters and places stay as in the original. Titles and
+sound effects drawn over the art are left as they are. A PDF with text
+and some page images is a document: its image pages are left as they are.
 
 ## How it works
 

@@ -103,7 +103,7 @@ def test_ligatures_and_symbols_are_drawn(fixture_paths):
     assert metrics["blank_chars"] == 0
     assert metrics["original_font_chars_pct"] > 90
 
-    from doc_translator.pipeline import translate_document
+    from doc_translator.modes.document import translate_document
 
     doc = pymupdf.open(fixture_paths["blank_ligatures"])
     translate_document(doc, measure.Identity())

@@ -1,4 +1,5 @@
-"""The pages of a document that are images, translated (ADR 0008)."""
+"""Comics (ADR 0008, 0009): pages that are images, read by OCR; their
+balloons erased and lettered again in the translation."""
 
 import logging
 from dataclasses import dataclass, field
@@ -7,10 +8,11 @@ import cv2
 import numpy as np
 import pymupdf
 
+from ..images import balloons as balloons_
+from ..images import clean, image_pages, ocr, typeset
+from ..images.text import join, respace
+from ..result import Result
 from ..translators.base import Translator, Unit
-from . import balloons as balloons_
-from . import clean, ocr, typeset
-from .text import join, respace
 
 log = logging.getLogger(__name__)
 
@@ -19,17 +21,23 @@ JPEG_QUALITY = 90
 
 
 @dataclass
-class ImagePagesResult:
+class ComicResult:
     pages: list[int] = field(default_factory=list)  # 0-based
     balloons: int = 0
     shrunk: list[str] = field(default_factory=list)  # texts written below typeset.MIN_SCALE
 
 
-def translate_pages(doc: pymupdf.Document, pages: list[int], translator: Translator) -> ImagePagesResult:
+def translate(doc: pymupdf.Document, translator: Translator, run: Result) -> None:
+    """The comic process: the pages that are images, into `run.images`."""
+    with run.timed("images"):
+        run.images = translate_pages(doc, image_pages(doc), translator)
+
+
+def translate_pages(doc: pymupdf.Document, pages: list[int], translator: Translator) -> ComicResult:
     """Read, erase and write again the balloons of `pages`, in place. Every
     balloon of the document goes to the engine in one call, in reading
     order: a story is translated knowing what came before."""
-    result = ImagePagesResult(pages=list(pages))
+    result = ComicResult(pages=list(pages))
     found = []
     for index in pages:
         page = doc[index]

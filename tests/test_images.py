@@ -51,6 +51,16 @@ def test_a_page_that_is_one_image_is_an_image_page():
     assert image_pages(pymupdf.open("pdf", comic_page())) == [0]
 
 
+def test_a_pdf_of_page_images_goes_to_the_comic_process():
+    from doc_translator.modes import DocumentError, choose
+
+    comic = pymupdf.open("pdf", comic_page())
+    assert choose(comic).name == "comic"
+    assert choose(comic).engine == "llm"
+    with pytest.raises(DocumentError, match="--mode comic"):
+        choose(comic, "document")
+
+
 def test_balloons_are_found_in_reading_order(page_image):
     found = balloons.find(page_image, ocr.read(page_image))
     texts = [respace(join([line.text for line in b.lines])).upper() for b in found]

@@ -1,6 +1,6 @@
 """Measure the pipeline: stage times and quality metrics, per document.
 
-Runs the real pipeline (doc_translator.pipeline.translate_document) and
+Runs the real pipeline (doc_translator.modes.document.translate_document) and
 compares its output with the original. Engines:
 
 - identity: original text through the whole pipeline, untranslated. Any
@@ -30,8 +30,9 @@ import pymupdf
 
 from doc_translator.align import base_style, paragraph_runs
 from doc_translator.analysis import Action
+from doc_translator.modes.document import translate_document
 from doc_translator.pdf.read import TEXT_FLAGS, link_key
-from doc_translator.pipeline import save, translate_document
+from doc_translator.pipeline import save
 from doc_translator.translators import Unit, UnitTranslation
 
 from . import corpus, defects, fixtures

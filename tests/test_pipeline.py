@@ -5,8 +5,9 @@ import json
 import pymupdf
 import pytest
 
-from doc_translator import pipeline
-from doc_translator.pipeline import DocumentError, translate_document, translate_pdf
+from doc_translator.modes import document
+from doc_translator.modes.document import translate_document
+from doc_translator.pipeline import DocumentError, translate_pdf
 from doc_translator.report import Report
 from doc_translator.translators.base import Unit, UnitTranslation
 from doc_translator.translators.cache import CachedTranslator, TranslationCache
@@ -106,14 +107,14 @@ def test_cache_follows_the_translation_code(tmp_path, monkeypatch):
 
 
 def test_page_failing_to_draw_is_kept_and_reported(monkeypatch):
-    original_draw = pipeline.draw_page
+    original_draw = document.draw_page
 
     def draw(page, placements, archive):
         if page.number == 1:
             raise ValueError("broken page")
         return original_draw(page, placements, archive)
 
-    monkeypatch.setattr(pipeline, "draw_page", draw)
+    monkeypatch.setattr(document, "draw_page", draw)
     doc = three_pages()
     result = translate_document(doc, Pseudo())
 
@@ -125,14 +126,14 @@ def test_page_failing_to_draw_is_kept_and_reported(monkeypatch):
 
 
 def test_page_failing_to_read_is_kept_and_reported(monkeypatch):
-    original_analyze = pipeline.analyze_page
+    original_analyze = document.analyze_page
 
     def analyze(page):
         if page.number == 0:
             raise ValueError("unreadable")
         return original_analyze(page)
 
-    monkeypatch.setattr(pipeline, "analyze_page", analyze)
+    monkeypatch.setattr(document, "analyze_page", analyze)
     doc = three_pages()
     result = translate_document(doc, Pseudo())
 
@@ -153,6 +154,14 @@ def test_unusable_documents_are_refused(tmp_path):
         translate_pdf(tmp_path / "text.pdf", tmp_path / "out.pdf", Counting())
 
 
+def test_a_pdf_with_text_goes_to_the_document_process():
+    from doc_translator.modes import choose
+
+    assert choose(three_pages()).name == "document"
+    with pytest.raises(DocumentError, match="no page of the PDF is an image"):
+        choose(three_pages(), "comic")
+
+
 # -- report ----------------------------------------------------------------------------
 
 
@@ -160,7 +169,7 @@ def test_report_counts_pages_failures_and_fonts(monkeypatch, tmp_path):
     def draw(page, placements, archive):
         raise ValueError("broken page")
 
-    monkeypatch.setattr(pipeline, "draw_page", draw)
+    monkeypatch.setattr(document, "draw_page", draw)
     result = translate_document(three_pages(), Counting())
     report = Report.from_result(result, tmp_path / "in.pdf", tmp_path / "out.pdf")
 
