@@ -139,6 +139,10 @@ def test_a_comic_page_is_translated_in_its_balloons(tmp_path):
     result = translate_pdf(source, tmp_path / "out.pdf", engine)
     assert result.images.balloons == 3
     assert all(unit.kind == "balloon" for unit in engine.units)
+    from doc_translator.report import Report
+
+    summary = Report.from_result(result, source, tmp_path / "out.pdf").summary()
+    assert summary.startswith("1 comic pages, 3 balloons lettered again")
     out = pymupdf.open(tmp_path / "out.pdf")
     written = out[0].get_text()
     assert "TRADUZIDO 0" in written and "TRADUZIDO 2" in written

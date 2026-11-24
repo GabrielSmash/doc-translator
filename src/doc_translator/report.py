@@ -43,6 +43,11 @@ class Report:
     fonts_replaced: list[str]  # drawn with a similar fallback font instead
     warnings: list[str] = field(default_factory=list)
     seconds: dict[str, float] = field(default_factory=dict)
+    # A comic (modes/comic.py): its pages, the balloons lettered again, and
+    # the translations lettered smaller than the original allows.
+    comic_pages: int = 0
+    balloons: int = 0
+    lettered_small: list[str] = field(default_factory=list)
 
     @classmethod
     def from_result(cls, result, source: Path, output: Path) -> "Report":
@@ -85,6 +90,9 @@ class Report:
             fonts_replaced=_font_names(f for f in used if f not in reused),
             warnings=list(result.warnings),
             seconds={k: round(v, 2) for k, v in result.seconds.items()},
+            comic_pages=len(result.images.pages) if result.images else 0,
+            balloons=result.images.balloons if result.images else 0,
+            lettered_small=list(result.images.shrunk) if result.images else [],
         )
 
     @property
@@ -95,10 +103,15 @@ class Report:
         paragraphs = sum(p.paragraphs for p in self.pages)
         share = 100 * self.chars_translated / self.chars if self.chars else 0
         seconds = sum(self.seconds.values())
-        lines = [
-            f"{len(self.pages)} pages, {paragraphs} paragraphs, "
-            f"{share:.0f}% of the text translated, in {seconds:.0f} s"
-        ]
+        if self.comic_pages:
+            lines = [f"{self.comic_pages} comic pages, {self.balloons} balloons lettered again, in {seconds:.0f} s"]
+            if self.lettered_small:
+                lines.append(f"  Lettered small: {len(self.lettered_small)} balloons (the translation is longer)")
+        else:
+            lines = [
+                f"{len(self.pages)} pages, {paragraphs} paragraphs, "
+                f"{share:.0f}% of the text translated, in {seconds:.0f} s"
+            ]
         kept: Counter[str] = Counter()
         for page in self.pages:
             kept.update(page.kept)
