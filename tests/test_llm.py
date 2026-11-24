@@ -22,6 +22,8 @@ class FakeLLM(LLMTranslator):
         self._sections = {}
         self._tables = {}
         self._table_cells = {}
+        self._context_units = 3
+        self._following_units = 0
         self._known = None
         self._spelling = None
         self.answers = iter(answers)
@@ -603,3 +605,16 @@ def test_a_comics_names_are_kept_and_its_common_phrases_left():
     ]
     assert llm._comic_names(texts) == ["Doctor Octopus"]
     assert "Artificial Arms" in llm.prompts[0][0]["content"]
+
+
+def test_balloons_see_the_story_around_them():
+    """A comic's balloons are short: three before them did not tell who was
+    speaking. They see about two pages before, and the balloons after."""
+    texts = [f"Line number {n} of the story!" for n in range(14)]
+    answers = [json.dumps({"translations": [f"Linha {n} da história!" for n in range(*span)]}) for span in ((0, 10), (10, 14))]
+    llm = FakeLLM(answers)
+    llm.translate_units([Unit(t, kind="balloon") for t in texts])
+    first, second = (prompt[1]["content"] for prompt in llm.prompts[-2:])
+    assert "Text that follows" in first and "Line number 13 of" in first.split("Text that follows")[1]
+    preceding = second.split("Preceding text")[1].split("Translate")[0]
+    assert all(f"Line number {n} of" in preceding for n in range(10))

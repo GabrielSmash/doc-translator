@@ -47,6 +47,12 @@ log = logging.getLogger(__name__)
 
 DEFAULT_HOST = "http://localhost:11434"
 CONTEXT_UNITS = 3  # preceding paragraphs shown as context
+# A comic's balloons are short and a scene runs over pages: three balloons
+# did not say who was speaking or what was going on ("arms" written as
+# "pernas"). About two pages before, and the next balloons (an answer tells
+# what a question meant).
+STORY_CONTEXT = 30
+STORY_FOLLOWING = 6
 # How much of the document the model reads to describe it: its headings and
 # its opening text, up to this many characters.
 BRIEF_CHARS = 3000
@@ -172,6 +178,8 @@ class LLMTranslator:
         self._spelling: Spelling | None = None
         self._tables: dict[str, str] = {}
         self._table_cells: dict[str, list[str]] = {}
+        self._context_units = CONTEXT_UNITS
+        self._following_units = 0
         digest = self._check_model()
         # The digest changes when `ollama pull` brings a new version.
         self.cache_id = f"llm|{model}|{digest}|{languages.target_code}|{glossary_id(glossary)}"
@@ -192,6 +200,7 @@ class LLMTranslator:
         self._brief = self._describe(units)
         if any(unit.kind == "balloon" for unit in units):
             self._brief = f"{self._format(COMIC_STYLE)}\n{self._brief}"
+            self._context_units, self._following_units = STORY_CONTEXT, STORY_FOLLOWING
         # The names the document itself shows to be names (its screens'
         # items, labels, quoted names), not a list asked of the model: asked,
         # it listed ordinary words ("STANDARD") and then wrote them in
@@ -249,8 +258,10 @@ class LLMTranslator:
         # The cells of one table go together, with the table as context.
         for batch in _batches(pending, lambda text: self._tables.get(text, "")):
             start = first_seen[batch[0]]
-            context = texts[max(0, start - CONTEXT_UNITS) : start] if with_context else []
-            translated = dict(zip(batch, self._translate_batch(batch, context, glossary)))
+            context = texts[max(0, start - self._context_units) : start] if with_context else []
+            end = first_seen[batch[-1]] + 1
+            following = texts[end : end + self._following_units] if with_context else []
+            translated = dict(zip(batch, self._translate_batch(batch, context, glossary, following)))
             self._cache.update(translated)
             if self._progress is not None:
                 self._progress.put_many(translated)
@@ -390,10 +401,12 @@ class LLMTranslator:
 
     # -- translation ---------------------------------------------------------
 
-    def _translate_batch(self, texts: list[str], context: list[str], glossary: Glossary) -> list[str]:
+    def _translate_batch(
+        self, texts: list[str], context: list[str], glossary: Glossary, following: list[str] = ()
+    ) -> list[str]:
         items = json.dumps([self._asked(t) for t in texts], ensure_ascii=False, indent=0)
         task = self._format(BATCH_PROMPT, count=len(texts), items=items)
-        prompt = self._prompt(task, texts, context, glossary)
+        prompt = self._prompt(task, texts, context, glossary, following)
         schema = {
             "type": "object",
             "properties": {"translations": _string_array(len(texts))},
@@ -413,7 +426,7 @@ class LLMTranslator:
             translation = self._match_case(text, _clean(translation, text))
             if _problems(text, translation, glossary, self._known, self._spelling) or _shifted(index, texts, translations):
                 # Context for a lone retry: whatever preceded it in the batch.
-                previous = (context + texts[:index])[-CONTEXT_UNITS:]
+                previous = (context + texts[:index])[-self._context_units :]
                 retry = self._translate_one(text, previous, glossary)
                 # The retry can be worse (left in English where the batch
                 # only missed a glossary term): keep the lesser problem.
@@ -503,7 +516,12 @@ class LLMTranslator:
         return sentence[:first] + sentence[first].upper() + sentence[first + 1 :]
 
     def _prompt(
-        self, task: str, texts: list[str], context: list[str], glossary: Glossary
+        self,
+        task: str,
+        texts: list[str],
+        context: list[str],
+        glossary: Glossary,
+        following: list[str] = (),
     ) -> list[dict]:
         parts = []
         if self._brief:
@@ -533,6 +551,8 @@ class LLMTranslator:
                 parts.append("Cells of this table already translated (follow them):\n" + "\n".join(done))
         elif context:
             parts.append("Preceding text (context only, do not translate):\n" + "\n".join(context))
+        if following:
+            parts.append("Text that follows (context only, do not translate):\n" + "\n".join(following))
         parts.append(task)
         return [
             {"role": "system", "content": self._format(SYSTEM_PROMPT)},
