@@ -119,6 +119,31 @@ def source_spelling(languages: LanguagePair) -> Spelling | None:
     return _dictionary(languages.source, languages.source_code, languages.source_dictionary)
 
 
+def source_word_ranks(languages: LanguagePair) -> dict[str, int] | None:
+    """Each word of the source language and its rank by use (0: the most
+    used), or None when the list can't be had."""
+    return _word_ranks(languages.source, languages.source_code, languages.source_word_ranks)
+
+
+@cache
+def _word_ranks(language: str, code: str, files: tuple[tuple[str, str], ...]) -> dict[str, int] | None:
+    if not files:
+        return None
+    import gzip
+
+    try:
+        stem = _download(f"{language} word list", code, files, "word-ranks")
+    except OSError as error:
+        log.warning("No %s word list (%s)", language, error)
+        return None
+    path = stem.with_suffix(Path(files[0][0]).suffix)
+    words = gzip.decompress(path.read_bytes()).decode().split()
+    ranks: dict[str, int] = {}
+    for rank, word in enumerate(words):
+        ranks.setdefault(word, rank)
+    return ranks
+
+
 @cache
 def _dictionary(language: str, code: str, files: tuple[tuple[str, str], ...]) -> Spelling | None:
     if not files:
@@ -126,24 +151,24 @@ def _dictionary(language: str, code: str, files: tuple[tuple[str, str], ...]) ->
     from spylls.hunspell import Dictionary
 
     try:
-        stem = _download(language, code, files)
+        stem = _download(f"{language} dictionary", code, files)
     except OSError as error:
         log.warning("No %s dictionary (%s); words are not checked", language, error)
         return None
     return Spelling(Dictionary.from_files(str(stem)))
 
 
-def _download(language: str, code: str, files: tuple[tuple[str, str], ...]) -> Path:
-    """The dictionary's files in the cache, as `<dir>/<code>` (+ .dic, .aff)."""
+def _download(label: str, code: str, files: tuple[tuple[str, str], ...], kind: str = "dictionaries") -> Path:
+    """The files in the cache, as `<dir>/<code>` (+ .dic, .aff)."""
     base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
-    folder = base / "doc-translator" / "dictionaries"
+    folder = base / "doc-translator" / kind
     folder.mkdir(parents=True, exist_ok=True)
     stem = folder / code
     for url, sha256 in files:
         path = stem.with_suffix(Path(url).suffix)
         if path.is_file() and _sha256(path.read_bytes()) == sha256:
             continue
-        log.info("Downloading the %s dictionary: %s", language, url)
+        log.info("Downloading the %s: %s", label, url)
         with urllib.request.urlopen(url, timeout=60) as response:
             data = response.read()
         if _sha256(data) != sha256:

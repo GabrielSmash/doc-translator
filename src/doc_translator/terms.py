@@ -25,6 +25,7 @@ COMMON = frozenset({
     "the", "of", "to", "in", "and", "a", "i", "he", "she", "we", "they", "me", "him", "her", "them", "us",
     "my", "his", "our", "their", "too", "no", "not", "all", "any", "one", "some", "now", "up", "out",
     "what", "who", "how", "why", "here", "there", "rest", "way", "time", "but", "for", "off", "own",
+    "am", "is", "are", "was", "you", "your",
 })
 # Titles before a name ("DR. OCTOPUS", "AUNT MAY").
 TITLES = r"(?:DR|MR|MRS|MS|PROF|PROFESSOR|CAPTAIN|CAPT|AUNT|UNCLE|SIR|LADY|MISS)"

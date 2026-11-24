@@ -89,6 +89,28 @@ def test_spaces_the_ocr_dropped_are_put_back():
     assert respace("NOONECAN HOLD HIM") == "NO ONE CAN HOLD HIM"
 
 
+def test_the_most_used_words_are_chosen():
+    """Long words of the dictionary are not enough: "MYNA ME", "THEW ALL",
+    "COMET RUE" are words too. The most used ones are taken."""
+    assert respace("YOUCANSAYMYNAME!") == "YOU CAN SAY MY NAME!"
+    assert respace("UP THEWALL") == "UP THE WALL"
+    assert respace("ABOUT TO COMETRUE") == "ABOUT TO COME TRUE"
+    assert respace("SUCHAMANISOTTOOCTAVIUS") == "SUCH A MAN IS OTTO OCTAVIUS"
+    # Speech: "me" is not rare in a comic ("TOME").
+    assert respace("ITMEANTALOTTOME!") == "IT MEANT A LOT TO ME!"
+
+
+def test_apostrophes_and_misread_letters():
+    assert respace("THEY'RETRYING TO") == "THEY'RE TRYING TO"
+    assert respace("I'VEGOTTO TRY IT") == "I'VE GOT TO TRY IT"
+    assert respace("DOCTOR OCTOPUS'ARMS") == "DOCTOR OCTOPUS' ARMS"
+    assert respace("THIS WIRING'LL SUIT ME") == "THIS WIRING'LL SUIT ME"
+    assert respace("ABILITYALONEISN'T ENOUGH") == "ABILITY ALONE ISN'T ENOUGH"
+    assert respace("ISUREAIN'T") == "I SURE AIN'T"
+    # A lone "L" is a misread "I".
+    assert respace("LETME UP! LMUSTRETURN") == "LET ME UP! I MUST RETURN"
+
+
 def test_names_in_capitals_are_found_by_repetition():
     texts = [
         "DOCTOR OCTOPUS IS STILL BREATHING!",

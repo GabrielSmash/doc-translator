@@ -58,3 +58,36 @@ A prototype on one page showed the whole path works on a laptop:
 
 - **2026-11-23:** by the user: the same project with an optional extra;
   RapidOCR and OpenCV; Comic Neue shipped; names kept as in the original.
+
+## Revision 2026-11-24: spaces put back by how much words are used
+
+On the whole comic, putting the spaces back with the dictionary alone
+chose long words, however rare: "MYNA ME", "THEW ALL", "COMET RUE", "MANI
+SOT TO OCTAVIO US". The model translated the misreading ("NO BURRO").
+
+- **Word ranks:** words are now chosen by how much they are used. The
+  ranks come from wordninja's list of 126k English words by frequency in
+  Wikipedia (MIT), pinned to a commit and checked against its SHA-256,
+  downloaded once like the dictionaries.
+- **Cost:** a split costs the sum of log(rank × log N) of its words
+  (Zipf's law); the cheapest one is kept.
+- **The dictionary vets the list:** only words the dictionary has are
+  ranked. The list has frequent misspellings and joined words ("noone",
+  "thankyou").
+- **Speech:** Wikipedia has little of it ("me" is its 600th word). The
+  language's common words count as used at least as the 100th, or
+  "TOME" would beat "TO ME".
+- **Apostrophes:** an apostrophe ends a word or joins an ending to it
+  ("OCTOPUS' ARMS", "WIRING'LL"); it does not start one.
+- **Misread "L":** a lone "L" is read as "I" ("I MUST RETURN").
+
+Result on the comic's 245 balloons: 60 spaced differently. About 50
+became right ("MY NAME", "THE WALL", "COME TRUE", "MAN IS OTTO", "FAR
+MORE", "I'VE GOT TO"). About 6 are ambiguous or worse ("POSTS ENTRIES",
+"FOUND AWAY", "ID ARE NOT").
+
+### Decisions taken
+
+- **2026-11-24:** by the user: the word list downloaded and pinned, with no
+  new package.
+

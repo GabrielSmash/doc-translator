@@ -226,5 +226,7 @@ licensed CC-BY-4.0. The comic lettering font, Comic Neue, is licensed
 under the SIL Open Font License 1.1 (`src/doc_translator/images/fonts/OFL.txt`). The pt-BR dictionary used to check words is
 LibreOffice's [VERO](https://github.com/LibreOffice/dictionaries/tree/master/pt_BR),
 licensed LGPLv3 or MPL 2.0, and the English one is SCOWL's en_US (from the
-same repository), under SCOWL's permissive license; both are downloaded,
-not distributed with this package.
+same repository), under SCOWL's permissive license. The list of English
+words by use, which puts back the spaces OCR drops in comics, is
+[wordninja](https://github.com/keredson/wordninja)'s, under the MIT
+license. All three are downloaded, not distributed with this package.
