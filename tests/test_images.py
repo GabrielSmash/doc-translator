@@ -83,6 +83,32 @@ def test_the_letters_are_erased_and_the_outline_kept(page_image):
     assert image[222:238, 84:100].min() < 80
 
 
+def test_lines_with_an_outline_between_them_are_two_texts():
+    """A thought balloon whose outline has gaps is one region with the
+    caption over it (page 6): the outline between their lines parts them."""
+    from doc_translator.images.ocr import TextLine
+
+    caption = TextLine((100, 100, 600, 130), "THEN SUDDENLY HIS ARMS MOVE", 1.0)
+    thought = TextLine((200, 160, 400, 190), "I'VE GOT TO BREAK", 1.0)
+    below = TextLine((200, 190, 400, 220), "THOSE BARS!", 1.0)
+    walls = np.zeros((300, 700), bool)
+    assert len(balloons._groups([caption, thought, below], walls)) == 1
+    walls[145, 150:450] = True  # the thought balloon's outline
+    texts = balloons._groups([caption, thought, below], walls)
+    assert sorted(len(t) for t in texts) == [1, 2]
+
+
+def test_the_lines_of_a_row_are_read_left_to_right():
+    from doc_translator.images.ocr import TextLine
+
+    # Two words of a row, the second a little higher.
+    row = [TextLine((1637, 2698, 1864, 2774), "BEGIN!", 1.0), TextLine((1402, 2706, 1629, 2763), "AND NOW", 1.0)]
+    assert [l.text for l in balloons._reading(row)] == ["AND NOW", "BEGIN!"]
+    # Lines one under the other overlap a little: still top to bottom.
+    stack = [TextLine((1416, 1746, 1655, 1824), "EPIC TALE.", 1.0), TextLine((1458, 1715, 1634, 1783), "IN THIS", 1.0)]
+    assert [l.text for l in balloons._reading(stack)] == ["IN THIS", "EPIC TALE."]
+
+
 def test_spaces_the_ocr_dropped_are_put_back():
     assert respace("THEX-RAYSSHOW AN UNCERTAIN AMOUNT OFBRAIN DAMAGE!") == "THE X-RAYS SHOW AN UNCERTAIN AMOUNT OF BRAIN DAMAGE!"
     assert respace(join(["THE RADIA", "TION HAS CAUSED THEM"])) == "THE RADIATION HAS CAUSED THEM"
@@ -146,3 +172,21 @@ def test_a_comic_page_is_translated_in_its_balloons(tmp_path):
     out = pymupdf.open(tmp_path / "out.pdf")
     written = out[0].get_text()
     assert "TRADUZIDO 0" in written and "TRADUZIDO 2" in written
+
+
+def test_a_text_the_translation_leaves_as_it_is_keeps_its_letters(tmp_path):
+    """A number, a name, a web address: erased and lettered again the same,
+    it would only lose the original lettering."""
+    from doc_translator.pipeline import translate_pdf
+
+    class KeepsTheCaption:
+        cache_id = "keeps"
+
+        def translate_units(self, units):
+            return [UnitTranslation(u.text if "LAB" in u.text else "TRADUZIDO", []) for u in units]
+
+    source = tmp_path / "comic.pdf"
+    source.write_bytes(comic_page())
+    result = translate_pdf(source, tmp_path / "out.pdf", KeepsTheCaption())
+    assert result.images.balloons == 2
+    assert "LAB" not in pymupdf.open(tmp_path / "out.pdf")[0].get_text()  # not lettered again

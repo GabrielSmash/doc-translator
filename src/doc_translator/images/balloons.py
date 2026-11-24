@@ -114,7 +114,12 @@ def find(image: np.ndarray, lines: list[TextLine]) -> list[Balloon]:
                     if regions[number]["area"] >= MIN_REGION_SHARE * (x1 - x0) * (y1 - y0):
                         votes[number] = votes.get(number, 0) + 1
         if votes:
-            owners.setdefault(max(votes, key=votes.get), []).append(line)
+            # A tight balloon's seeds also reach the panel around it (a
+            # thought balloon under a caption, page 6): the line is in the
+            # smallest region holding it.
+            holding = [n for n in votes if _holds(regions[n]["box"], line.box)]
+            owner = min(holding, key=lambda n: regions[n]["area"]) if holding else max(votes, key=votes.get)
+            owners.setdefault(owner, []).append(line)
 
     balloons = []
     for number, own in owners.items():
@@ -122,22 +127,88 @@ def find(image: np.ndarray, lines: list[TextLine]) -> list[Balloon]:
         if region["area"] > MAX_PAGE_SHARE * width * height:
             continue  # text over the page's art
         whole = region_of == number
-        # Balloons touching each other are one region: their texts stand
-        # side by side, in columns no line crosses.
-        columns = _columns(own)
-        cuts = [0] + [(max(l.box[2] for l in a) + min(l.box[0] for l in b)) // 2 for a, b in itertools.pairwise(columns)] + [width]
-        for column, left, right in zip(columns, cuts, cuts[1:]):
+        # One region can hold several texts: balloons touching each other,
+        # a thought balloon whose outline has gaps under a caption (page 6),
+        # a cover's sky under its blurbs. Each text gets the part of the
+        # region on its side.
+        groups = _groups(own, walls)
+        for group in groups:
             inside = whole.copy()
-            inside[:, :left] = False
-            inside[:, right:] = False
-            balloons.append(_balloon(image, column, inside))
+            for other in groups:
+                if other is not group:
+                    _cut(inside, _box(group), _box(other))
+            balloons.append(_balloon(image, group, inside))
     return reading_order(balloons, panels(gray))
+
+
+def _holds(box: tuple[int, int, int, int], inner: tuple[int, int, int, int]) -> bool:
+    return box[0] <= inner[0] and box[1] <= inner[1] and box[2] >= inner[2] and box[3] >= inner[3]
+
+
+def _box(lines: list[TextLine]) -> tuple[int, int, int, int]:
+    return (min(l.box[0] for l in lines), min(l.box[1] for l in lines), max(l.box[2] for l in lines), max(l.box[3] for l in lines))
+
+
+# Lines this far apart, in line heights, are not one text.
+LINE_GAP = 1.0
+# Lines with an outline between them across this share of their overlap
+# are in different balloons.
+WALLED = 0.6
+
+
+def _groups(lines: list[TextLine], walls: np.ndarray) -> list[list[TextLine]]:
+    """`lines` in texts: a line is in the text of a line just above it
+    (they overlap across, nothing but the balloon's inside between them)
+    or beside it on the same row."""
+    lines = sorted(lines, key=lambda l: (l.box[1], l.box[0]))
+    parent = list(range(len(lines)))
+
+    def root(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for (i, a), (j, b) in itertools.combinations(enumerate(lines), 2):
+        if _linked(a, b, walls):
+            parent[root(j)] = root(i)
+    texts: dict[int, list[TextLine]] = {}
+    for i, line in enumerate(lines):
+        texts.setdefault(root(i), []).append(line)
+    return list(texts.values())
+
+
+def _linked(a: TextLine, b: TextLine, walls: np.ndarray) -> bool:
+    (ax0, ay0, ax1, ay1), (bx0, by0, bx1, by1) = a.box, b.box
+    height = max(ay1 - ay0, by1 - by0)
+    if min(ay1, by1) - max(ay0, by0) > height / 2:  # the same row
+        return max(ax0, bx0) - min(ax1, bx1) <= LINE_GAP * height / 2
+    left, right = max(ax0, bx0), min(ax1, bx1)
+    top, bottom = (ay1, by0) if ay0 < by0 else (by1, ay0)
+    if right <= left or bottom - top > LINE_GAP * height:
+        return False
+    if bottom <= top:
+        return True
+    crossed = walls[top:bottom, left:right].any(axis=0)
+    return crossed.mean() < WALLED
+
+
+def _cut(inside: np.ndarray, own: tuple[int, int, int, int], other: tuple[int, int, int, int]) -> None:
+    """Keep the side of `inside` toward `own`, halfway to `other`."""
+    if own[2] <= other[0]:
+        inside[:, (own[2] + other[0]) // 2 :] = False
+    elif other[2] <= own[0]:
+        inside[:, : (other[2] + own[0]) // 2] = False
+    elif own[3] <= other[1]:
+        inside[(own[3] + other[1]) // 2 :, :] = False
+    elif other[3] <= own[1]:
+        inside[: (other[3] + own[1]) // 2, :] = False
 
 
 def _balloon(image: np.ndarray, lines: list[TextLine], inside: np.ndarray) -> Balloon:
     ys, xs = np.nonzero(inside)
     x0, y0, x1, y1 = int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
-    balloon = Balloon(sorted(lines, key=lambda line: (line.box[1], line.box[0])), (x0, y0, x1, y1), _color(image, inside))
+    balloon = Balloon(_reading(lines), (x0, y0, x1, y1), _color(image, inside))
     tx0, ty0, tx1, ty1 = balloon.text_box
     # Leaked through a gap into the panel: a shape filling little of its
     # box (a balloon fills 70% of it, a caption all of it).
@@ -161,17 +232,6 @@ def _balloon(image: np.ndarray, lines: list[TextLine], inside: np.ndarray) -> Ba
         # With its letters: a caption fills its box whatever its text.
         balloon.round = np.count_nonzero(balloon.mask) < RECTANGLE_FILL * (x1 - x0 + 1) * (y1 - y0 + 1)
     return balloon
-
-
-def _columns(lines: list[TextLine]) -> list[list[TextLine]]:
-    """`lines` in groups whose horizontal extents overlap, left to right."""
-    groups: list[list[TextLine]] = []
-    for line in sorted(lines, key=lambda l: l.box[0]):
-        if groups and line.box[0] < max(l.box[2] for l in groups[-1]):
-            groups[-1].append(line)
-        else:
-            groups.append([line])
-    return groups
 
 
 def panels(gray: np.ndarray) -> list[tuple[int, int, int, int]]:
@@ -213,6 +273,26 @@ def _rows(items: list, box_of) -> list:
         else:
             row.append(item)
     return [item for row in rows for item in sorted(row, key=lambda i: box_of(i)[0])]
+
+
+# Lines sharing this share of their height are one row; lines one under
+# the other share up to half of it ("IN THIS" over "EPIC TALE.", page 2).
+SAME_ROW = 0.75
+
+
+def _reading(lines: list[TextLine]) -> list[TextLine]:
+    """A text's lines top to bottom; lines of one row ("AND NOW" "BEGIN!",
+    a little apart in height) left to right. Consecutive lines overlap a
+    few pixels: a row is lines sharing most of their height."""
+    rows: list[list[TextLine]] = []
+    for line in sorted(lines, key=lambda l: l.box[1]):
+        last = rows[-1][-1].box if rows else None
+        height = min(line.box[3] - line.box[1], last[3] - last[1]) if last else 0
+        if last and min(line.box[3], last[3]) - max(line.box[1], last[1]) > SAME_ROW * height:
+            rows[-1].append(line)
+        else:
+            rows.append([line])
+    return [line for row in rows for line in sorted(row, key=lambda l: l.box[0])]
 
 
 def _area(box: tuple[int, int, int, int]) -> int:

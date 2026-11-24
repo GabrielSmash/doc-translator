@@ -91,3 +91,43 @@ MORE", "I'VE GOT TO"). About 6 are ambiguous or worse ("POSTS ENTRIES",
 - **2026-11-24:** by the user: the word list downloaded and pinned, with no
   new package.
 
+
+## Revision 2026-11-24: one region, several texts; text left as drawn
+
+Two pages reported by the user:
+
+- **Page 6:** a caption and the thought balloon under it became one text,
+  lettered outside the panel. The thought balloon's outline has gaps, so
+  its inside, the panel and the caption are one flooded region; the
+  seeds above its lines also reach the panel.
+- **The cover:** the sky under the web was one region holding the Comics
+  Code stamp, the date, the web address and the starburst blurb: one
+  text, painted blue over the art and lettered in a corner. The logo's
+  "the" was lettered "O".
+
+Decisions:
+
+- **Smallest region:** a line belongs to the smallest region that holds
+  it, not to the one most of its seeds reach.
+- **Texts within a region:**
+  - Lines are one text when they are near each other and no outline runs
+    between them: one under the other with overlapping extents, or side
+    by side on a row.
+  - Each text gets the part of the region on its side, cut halfway to
+    the other texts.
+  - This replaces the columns of touching balloons.
+- **Line order:** a text's lines are read in rows, left to right. Lines
+  sharing three quarters of their height are one row ("AND NOW" "BEGIN!").
+- **Display text:** an open text with letters more than twice the comic's
+  usual lettering height is a title, a logo or a blurb over the art. It is
+  left as drawn.
+- **Unchanged text:** a text the translation leaves as it is (a door number,
+  a web address) keeps its original letters: it is neither erased nor
+  lettered again.
+
+On the whole comic, the texts found changed only where two texts had been
+joined:
+- p14: "…SAY, WHAT'S" and "AND THERE'S NO ONE…";
+- p8: "WELL, WELL!";
+- p6: the thought balloon;
+- p1: the cover's texts.
