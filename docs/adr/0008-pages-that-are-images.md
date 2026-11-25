@@ -196,3 +196,52 @@ On the comic: 243 phrases in 251 texts. On page 6, the thought balloon
 "**I DID IT!!** MY **ARMS** DID IT! ... **INCALCULABLE!** ... **ANYTHING!!**"
 is found word for word, and 17 of the page's 18 phrases are found in the
 translation.
+
+## Revision 2026-11-25: page 6 as the user saw it
+
+The user reported page 6:
+
+- "MINUTES LATER..." was left in English.
+- Squares of the balloon's color were painted over the outlines.
+- An "I" was left beside "JÁ OUVI".
+- "I5THAT", "151T" and "1.NOO10OW" were translated as they were.
+
+Causes and decisions:
+
+- **Tight captions:** a region had to be twice its line's box to hold the
+  line; a caption hugging its text is less ("MINUTES LATER...": 1.95).
+  The rule only keeps out letters' holes and gaps between letters, which
+  are much smaller. It is now 1.5. On the comic this found 12 more texts,
+  most of them captions ("SECONDS LATER", "AND SO..").
+- **Text placed too high:** a caption's text can sit closer to its top
+  than the lettering margin allows. Centered there, the translation was
+  lettered small. Failing that center, the middle of the room is tried.
+- **Erasing open balloons:** an open balloon's lines were erased box by
+  box. The boxes cross the outline where the text runs close to it. They
+  are now painted only within the balloon's region near its text, and
+  reach a letter height sideways to catch letters the OCR left out ("I").
+- **Marks left out of lines:** in a closed balloon, ink near the text is
+  erased too when it is as small as a letter (the dots of "LATER...").
+  - A first version erased all ink within a line height of the text. It
+    painted a wall white: the light blue wall was part of the two
+    balloons' region, reached through their tails.
+  - Shapes larger than a letter, or running further, are outlines and art,
+    and are kept.
+- **Digits read for letters:** hand lettering's I, S, O and B are read as
+  1, 5, 0 and 8 ("I5THAT", "151T"). Every number of the original must be
+  in the translation, so the model had to keep them. In a word of letters
+  and digits, the digits are read as letters when that makes known words.
+- **Lines read unsure:** a line read with a confidence under 0.85 is read
+  again from its box with a third of its height around it. The new
+  reading is kept when it is surer and at least 0.85 ("1.NOO10O" became
+  "OUT!DON'T"; the door's "1201" became "L!" at 0.68 and was not kept).
+  On the comic, 38 of 1337 lines are read again.
+- **Two balloons side by side** ("WHAT IS IT? YOU-- OH, NO! NO!" and "HA-HA!
+  YOU DON'T BELIEVE..."):
+  - Lines on one row are one text only when no outline runs between them.
+    Lines one under the other must share a quarter of the narrower one's
+    width: a corner is not enough.
+  - In a row, balloons are ordered by their texts, not their regions; the
+    region of the right one started left of both.
+  - Two captions on pages 15 and 18 are now read before the balloons
+    under them.

@@ -60,7 +60,11 @@ def write(
     base = balloon.cap_height / CAP if balloon.cap_height else balloon.line_height * SIZE_PER_LINE
     blue, green, red = balloon.ink
     tx0, ty0, tx1, ty1 = balloon.text_box
-    center = ((tx0 + tx1) / 2, (ty0 + ty1) / 2)
+    # Where the original text was; failing that, the middle of the room: a
+    # caption's text can sit near its top, closer than the margin allows
+    # ("MINUTES LATER...", page 6).
+    ys, xs = np.nonzero(room)
+    centers = [((tx0 + tx1) / 2, (ty0 + ty1) / 2), ((tx0 + tx1) / 2, (ys.min() + ys.max()) / 2)]
 
     def widths(size: float) -> list[float]:
         return [
@@ -69,11 +73,11 @@ def write(
         ]
 
     for step in STEPS:
-        if lines := _fit(widths(base * step), room, base * step, center):
+        if lines := next(filter(None, (_fit(widths(base * step), room, base * step, c) for c in centers)), None):
             break
     else:
         step = STEPS[-1] * 0.8
-        lines = _fit(widths(base * step), room, base * step, center, force=True)
+        lines = _fit(widths(base * step), room, base * step, centers[0], force=True)
     size = base * step
     space = _font().text_length(" ", fontsize=size)
     sizes = widths(size)

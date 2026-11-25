@@ -26,7 +26,7 @@ LIGHT = 170
 # A region larger than this share of the page is the page, not a balloon.
 MAX_PAGE_SHARE = 0.15
 # A region at least this many times its line's box holds that line.
-MIN_REGION_SHARE = 2
+MIN_REGION_SHARE = 1.5
 # A region this much larger than its text (and this many pixels more) is
 # open: its text box is the room.
 OPEN_WIDTH, OPEN_HEIGHT = 2.2, 2.5
@@ -163,6 +163,8 @@ LINE_GAP = 1.0
 # Lines with an outline between them across this share of their overlap
 # are in different balloons.
 WALLED = 0.6
+# Lines one under the other share this share of the narrower one's width.
+MIN_SHARED = 0.25
 
 
 def _groups(lines: list[TextLine], walls: np.ndarray) -> list[list[TextLine]]:
@@ -191,10 +193,21 @@ def _linked(a: TextLine, b: TextLine, walls: np.ndarray) -> bool:
     (ax0, ay0, ax1, ay1), (bx0, by0, bx1, by1) = a.box, b.box
     height = max(ay1 - ay0, by1 - by0)
     if min(ay1, by1) - max(ay0, by0) > height / 2:  # the same row
-        return max(ax0, bx0) - min(ax1, bx1) <= LINE_GAP * height / 2
+        gap = max(ax0, bx0) - min(ax1, bx1)
+        if gap > LINE_GAP * height / 2:
+            return False
+        if gap <= 0:
+            return True
+        # Two balloons side by side, their lines close ("OH, NO! NO!" and
+        # "WHAT YOU", page 6): the outline between them.
+        crossed = walls[max(ay0, by0) : min(ay1, by1), min(ax1, bx1) : max(ax0, bx0)].any(axis=1)
+        return crossed.mean() < WALLED
     left, right = max(ax0, bx0), min(ax1, bx1)
     top, bottom = (ay1, by0) if ay0 < by0 else (by1, ay0)
-    if right <= left or bottom - top > LINE_GAP * height:
+    # One under the other, lines of a text share much of their width; lines
+    # of balloons side by side, a corner at most ("OH, NO! NO!" over "SEE?
+    # BUT", page 6).
+    if right - left < MIN_SHARED * min(ax1 - ax0, bx1 - bx0) or bottom - top > LINE_GAP * height:
         return False
     if bottom <= top:
         return True
@@ -302,7 +315,13 @@ def reading_order(balloons: list[Balloon], panel_boxes: list[tuple[int, int, int
     groups: dict[int, list[Balloon]] = {}
     for balloon in balloons:
         groups.setdefault(panel_of(balloon), []).append(balloon)
-    return [b for panel in sorted(groups, key=order.get) for b in _rows(groups[panel], lambda b: b.box)]
+    # Rows by the regions' heights; in a row, left to right by the texts: a
+    # region holding two balloons side by side starts left of both (page 6).
+    return [
+        b
+        for panel in sorted(groups, key=order.get)
+        for b in _rows(groups[panel], lambda b: (b.text_box[0], b.box[1], b.text_box[2], b.box[3]))
+    ]
 
 
 def _rows(items: list, box_of) -> list:

@@ -83,6 +83,112 @@ def test_the_letters_are_erased_and_the_outline_kept(page_image):
     assert image[222:238, 84:100].min() < 80
 
 
+def test_marks_the_ocr_left_out_of_a_closed_balloon_are_erased(page_image):
+    """The dots of "LATER..." the OCR did not put in the line (page 6)."""
+    image = page_image.copy()
+    found = balloons.find(image, ocr.read(image))
+    first = found[0]
+    x0, y0, x1, y1 = first.text_box
+    cv2.circle(image, (x0 - 20, (y0 + y1) // 2), 4, (0, 0, 0), -1)
+    # Away from the text, a mark is art the region holds (a door, page 6).
+    cv2.circle(image, ((x0 + x1) // 2, y1 + 50), 4, (0, 0, 0), -1)
+    assert first.mask[y1 + 50, (x0 + x1) // 2]
+    # Near the text, a long shape is art too (an outline, a wall the region
+    # reaches, page 6).
+    cv2.rectangle(image, (x0, y1 + 10), (x0 + 150, y1 + 16), (0, 0, 0), -1)
+    assert first.mask[y1 + 13, x0 + 150]
+    clean.erase(image, found)
+    assert image[y1 + 13, x0 + 75].max() < 80
+    assert cv2.cvtColor(image[(y0 + y1) // 2 - 6 : (y0 + y1) // 2 + 6, x0 - 26 : x0 - 14], cv2.COLOR_BGR2GRAY).min() > 150
+    assert image[y1 + 50, (x0 + x1) // 2].max() < 80
+
+
+def open_balloon_page() -> np.ndarray:
+    """A balloon whose outline has a gap into its panel (an open one), its
+    text close to its outline."""
+    drawn = pymupdf.open()
+    page = drawn.new_page(width=WIDTH, height=HEIGHT)
+    archive = pymupdf.Archive(str(FONT_DIR))
+    page.draw_rect(pymupdf.Rect(270, 170, 730, 470), color=(0, 0, 0), fill=(0.55, 0.75, 0.9), width=6)
+    page.draw_oval(pymupdf.Rect(300, 200, 700, 400), color=(0, 0, 0), fill=(1, 1, 1), width=5)
+    page.draw_rect(pymupdf.Rect(480, 390, 520, 410), color=None, fill=(1, 1, 1))  # the gap
+    page.insert_htmlbox(pymupdf.Rect(340, 250, 660, 350), "<p>SIM! ENTRE! FECHE A PORTA!</p>", css=LETTERING, archive=archive)
+    picture = page.get_pixmap(dpi=72)
+    return cv2.imdecode(np.frombuffer(picture.tobytes("png"), np.uint8), cv2.IMREAD_COLOR)
+
+
+def test_an_open_balloon_is_erased_within_its_outline():
+    """Its lines' boxes, run past its outline, are painted only where the
+    balloon is: no squares of its color over the outline and the panel
+    (page 6). A letter the OCR left out beside a line goes too ("I" of "I
+    NEVER")."""
+    from doc_translator.images.ocr import TextLine
+
+    image = open_balloon_page()
+    lines = ocr.read(image)
+    # A box crossing the outline, as the OCR's do near it.
+    x0, y0, x1, y1 = lines[0].box
+    lines[0] = TextLine((x0, y0, 720, y1), lines[0].text, lines[0].score)
+    [balloon] = balloons.find(image, lines)
+    assert balloon.open
+    sx0, sy0, _, sy1 = lines[1].box  # "PORTA!", away from the outline
+    cv2.putText(image, "I", (sx0 - 25, sy1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 3)
+    before = image.copy()
+    clean.erase(image, [balloon])
+    changed = (before != image).any(axis=2)
+    assert not (changed & (balloon.room_mask == 0)).any()
+    assert cv2.cvtColor(image[sy0:sy1, sx0 - 30 : sx0 - 2], cv2.COLOR_BGR2GRAY).min() > 150
+
+
+def test_a_translation_goes_in_the_middle_of_its_room_where_the_text_was_too_high():
+    """A caption's text near its top ("MINUTES LATER...", page 6): centered
+    there, the translation was lettered small; in the middle of the caption
+    it fits at the original size."""
+    from doc_translator.images import typeset
+    from doc_translator.images.ocr import TextLine
+
+    mask = np.zeros((300, 800), np.uint8)
+    mask[100:175, 200:580] = 255
+    caption = balloons.Balloon(
+        [TextLine((230, 113, 540, 144), "MINUTES LATER...", 1.0)], (200, 100, 579, 174), (200, 250, 250),
+        mask=mask, round=False, cap_height=21.0,
+    )
+    page = pymupdf.open().new_page(width=800, height=300)
+    typeset.prepare(page)
+    assert typeset.write(page, caption, "MINUTOS DEPOIS...", 1.0) == 1.0
+
+
+def test_digits_read_for_letters_are_letters_again():
+    """Hand lettering's I, S and O read as 1, 5 and 0: the translation had to
+    keep "I5THAT" (every number of the original stays)."""
+    assert respace("OUR AGREEMENT, J.J., I5THATYOU'RE NEVER") == "OUR AGREEMENT, J.J., IS THAT YOU'RE NEVER"
+    assert respace("WHAT YOU DON'T 151T?") == "WHAT YOU DON'T IS IT?"
+    assert respace("ROOM 1201, IN 1963") == "ROOM 1201, IN 1963"  # numbers stay
+    assert respace("MARVEL COMICS 12T GROUP") == "MARVEL COMICS 12T GROUP"  # no words in "IZT"
+
+
+def test_a_line_read_unsure_is_read_again_with_room_around_it(monkeypatch):
+    from doc_translator.images import ocr as ocr_
+
+    class Engine:
+        def __call__(self, image, use_det=None, use_cls=None):
+            if use_det is False:  # the line, read again
+                return [["OUT!DON'T", 0.96]], None
+            return [[[[10, 10], [90, 10], [90, 40], [10, 40]], "1.NOO10O", 0.59]], None
+
+    monkeypatch.setattr(ocr_, "_engine", lambda: Engine())
+    assert [line.text for line in ocr_.read(np.full((60, 120, 3), 255, np.uint8))] == ["OUT!DON'T"]
+
+    class Unsure(Engine):
+        def __call__(self, image, use_det=None, use_cls=None):
+            if use_det is False:
+                return [["L!", 0.68]], None  # surer, not sure: the door's "1201"
+            return [[[[10, 10], [90, 10], [90, 40], [10, 40]], "1201", 0.51]], None
+
+    monkeypatch.setattr(ocr_, "_engine", lambda: Unsure())
+    assert [line.text for line in ocr_.read(np.full((60, 120, 3), 255, np.uint8))] == ["1201"]
+
+
 def test_lines_with_an_outline_between_them_are_two_texts():
     """A thought balloon whose outline has gaps is one region with the
     caption over it (page 6): the outline between their lines parts them."""
@@ -96,6 +202,23 @@ def test_lines_with_an_outline_between_them_are_two_texts():
     walls[145, 150:450] = True  # the thought balloon's outline
     texts = balloons._groups([caption, thought, below], walls)
     assert sorted(len(t) for t in texts) == [1, 2]
+
+
+def test_lines_of_balloons_side_by_side_are_not_one_text():
+    """Two balloons touching ("WHAT IS IT? YOU-- OH, NO! NO!" and "HA-HA! YOU
+    DON'T BELIEVE...", page 6): lines on a row close to each other, and
+    lines meeting at a corner, with the outline between them."""
+    from doc_translator.images.ocr import TextLine
+
+    walls = np.zeros((200, 300), np.uint8)
+    walls[:, 100] = 255  # the outline between the balloons
+    left, right = TextLine((10, 20, 95, 50), "OH, NO! NO!", 1.0), TextLine((105, 22, 190, 52), "WHAT YOU", 1.0)
+    assert not balloons._linked(left, right, walls)
+    assert balloons._linked(left, right, np.zeros_like(walls))  # one balloon: one text
+    corner = TextLine((94, 48, 200, 80), "SEE? BUT", 1.0)
+    assert not balloons._linked(left, corner, np.zeros_like(walls))
+    under = TextLine((20, 52, 90, 82), "WHAT", 1.0)
+    assert balloons._linked(left, under, np.zeros_like(walls))
 
 
 def test_the_lines_of_a_row_are_read_left_to_right():

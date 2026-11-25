@@ -50,7 +50,29 @@ def respace(text: str, languages: LanguagePair = EN_PT_BR) -> str:
             return " ".join(_split_by_use(match.group(0), dictionary, ranks, hyphen, common))
         return " ".join(_split(match.group(0), dictionary, common, hyphen))
 
+    text = re.sub(r"[A-Za-z0-9']*[A-Za-z][A-Za-z0-9']*", lambda m: _digits_as_letters(m.group(0), dictionary, ranks), text)
     return re.sub(rf"[A-Za-z']{{{MIN_RUN},}}", split, text)
+
+
+# Digits the OCR reads for letters of hand lettering ("I5THAT", "151T").
+LETTER_LIKE = str.maketrans({"0": "O", "1": "I", "5": "S", "8": "B"})
+
+
+def _digits_as_letters(word: str, dictionary: Spelling, ranks: dict[str, int] | None) -> str:
+    """`word`, letters and digits, with its digits read as the letters they
+    look like when that makes known words ("I5THAT": "ISTHAT"); else as
+    it is ("12T", "A7OH")."""
+    if not any(c.isdigit() for c in word):
+        return word
+    letters = word.translate(LETTER_LIKE)
+    if any(c.isdigit() for c in letters):
+        return word
+    words = _split_by_use(letters, dictionary, ranks) if ranks else _split(letters, dictionary, frozenset())
+    known = all(
+        w.lower() in "ai" if len(w) == 1 else dictionary.has(w.lower()) or dictionary.has(w.capitalize())
+        for w in words
+    )
+    return letters if known else word
 
 
 def _split(run: str, dictionary: Spelling, common: frozenset[str], hyphen: bool = False) -> list[str]:
