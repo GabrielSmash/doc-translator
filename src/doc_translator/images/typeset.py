@@ -61,9 +61,17 @@ def write(
     pivot = ((tx0 + tx1) / 2, (ty0 + ty1) / 2)
     # A slanted text (an arrow's, page 2): its room turned level around the
     # text's middle, fitted as any, and written turned back.
+    # Where the original lines were: each new line goes to the part of the
+    # room the original text was in at its height.
+    guide = np.zeros(room.shape, np.uint8)
+    for line in balloon.lines:
+        lx0, ly0, lx1, ly1 = (max(0, v) for v in line.box)
+        guide[ly0:ly1, lx0:lx1] = 1
     if angle := balloon.angle:
         turn = cv2.getRotationMatrix2D(pivot, angle, 1.0)
         room = cv2.warpAffine(room.astype(np.uint8), turn, (room.shape[1], room.shape[0]), flags=cv2.INTER_NEAREST) > 0
+        guide = cv2.warpAffine(guide, turn, (guide.shape[1], guide.shape[0]), flags=cv2.INTER_NEAREST)
+    guide = guide > 0
     base = balloon.cap_height / CAP if balloon.cap_height else balloon.line_height * SIZE_PER_LINE
     blue, green, red = balloon.ink
     # Where the original text was; failing that, the middle of the room: a
@@ -79,11 +87,11 @@ def write(
         ]
 
     for step in STEPS:
-        if lines := next(filter(None, (_fit(widths(base * step), room, base * step, c) for c in centers)), None):
+        if lines := next(filter(None, (_fit(widths(base * step), room, base * step, c, guide=guide) for c in centers)), None):
             break
     else:
         step = STEPS[-1] * 0.8
-        lines = _fit(widths(base * step), room, base * step, centers[0], force=True)
+        lines = _fit(widths(base * step), room, base * step, centers[0], force=True, guide=guide)
     size = base * step
     space = _font().text_length(" ", fontsize=size)
     sizes = widths(size)
@@ -128,7 +136,12 @@ def _room(balloon: Balloon) -> np.ndarray:
 
 
 def _fit(
-    widths: list[float], room: np.ndarray, size: float, center: tuple[float, float], force: bool = False
+    widths: list[float],
+    room: np.ndarray,
+    size: float,
+    center: tuple[float, float],
+    force: bool = False,
+    guide: np.ndarray | None = None,
 ) -> list[tuple[int, int, float, float]] | None:
     """Lines (first word, end word, left x, baseline) of words this wide at
     `size`, centered on `center`, each within the room at its height; None
@@ -140,7 +153,7 @@ def _fit(
     cx, cy = center
     for count in range(1, len(widths) + 1):
         top = cy - count * line_height / 2
-        spans = [_span(inside, top + i * line_height, top + (i + 1) * line_height, cx) for i in range(count)]
+        spans = [_span(inside, top + i * line_height, top + (i + 1) * line_height, cx, guide) for i in range(count)]
         if not force and any(span is None for span in spans):
             if top < 0 or all(span is None for span in spans):
                 return None
@@ -167,23 +180,31 @@ def _fit(
     return None
 
 
-def _span(inside: np.ndarray, top: float, bottom: float, cx: float) -> tuple[float, float] | None:
-    """The room's run around `cx` that is free from `top` to `bottom`."""
+def _span(
+    inside: np.ndarray, top: float, bottom: float, cx: float, guide: np.ndarray | None = None
+) -> tuple[float, float] | None:
+    """The room's run free from `top` to `bottom`: the one where the original
+    text was at that height (`guide`: its lines' boxes), or around `cx`.
+    In two balloons joined (page 14), the original text goes from one to the
+    other; centered on the whole, lines fell on the narrow join."""
     height, width = inside.shape
     y0, y1 = int(max(0, top)), int(min(height, bottom + 1))
     if y0 >= y1 or top < 0 or bottom >= height:
         return None
     free = inside[y0:y1].all(axis=0)
+    if not free.any():
+        return None
+    edges = np.flatnonzero(np.diff(np.concatenate(([0], free.astype(np.int8), [0]))))
+    runs = list(zip(edges[::2], edges[1::2] - 1))
+    if guide is not None:
+        text = guide[y0:y1].any(axis=0)
+        overlap = [int(text[left : right + 1].sum()) for left, right in runs]
+        if max(overlap) > 0:
+            left, right = runs[int(np.argmax(overlap))]
+            return (float(left), float(right))
     x = int(min(max(cx, 0), width - 1))
-    if not free[x]:
-        runs = np.flatnonzero(free)
-        if runs.size == 0:
-            return None
-        x = int(runs[np.abs(runs - cx).argmin()])
-    left = x
-    while left > 0 and free[left - 1]:
-        left -= 1
-    right = x
-    while right < width - 1 and free[right + 1]:
-        right += 1
+    for left, right in runs:
+        if left <= x <= right:
+            return (float(left), float(right))
+    left, right = min(runs, key=lambda run: min(abs(run[0] - cx), abs(run[1] - cx)))
     return (float(left), float(right))

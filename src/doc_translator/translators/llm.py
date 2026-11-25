@@ -130,12 +130,32 @@ ambiguous words have in it. No preamble.
 
 {excerpt}"""
 
+# A comic read whole before it is translated (ADR 0008): who its characters
+# are. Without it the model wrote "A SUPER-HERÓI" for Spider-Man.
+CAST_PROMPT = """Below is part {part} of {parts} of a comic book's text \
+(speech balloons and captions, in reading order). List its characters, \
+those who appear and those who are named, adding to the list so far: for \
+each, the name as written, the gender ("male", "female", "group" or \
+"unknown"), and in a few words who they are (other names they go by, \
+their role). Keep the entries of the list so far, completing them.
+Answer with {{"characters": [{{"name": "...", "gender": "...", "about": "..."}}]}}.
+
+List so far:
+{known}
+
+Text:
+{text}"""
+CAST_CHARS = 6000  # text read per call
+CAST_SIZE = 25  # characters kept in the list
+
+
 # Balloons read from a comic's pages (ADR 0008).
 COMIC_STYLE = (
     "The texts are a comic book's speech balloons, thought balloons and narration captions, in "
     "reading order. Translate speech as natural, colloquial {target} dialogue, as {target} comics "
     "do: short and lively, keeping exclamations and the tone; captions as narration. Keep the names "
-    "of characters, places and teams as in the original. The texts come from OCR: a letter may be "
+    "of characters, places and teams as in the original. Words for a character (hero, villain, "
+    "adjectives, articles) agree with the character's gender. The texts come from OCR: a letter may be "
     "misread (\"L MUST\" for \"I MUST\")."
 )
 
@@ -208,7 +228,8 @@ class LLMTranslator:
         # in a frame is a circuit board).
         self._brief = self._describe(units)
         if any(unit.kind == "balloon" for unit in units):
-            self._brief = f"{self._format(COMIC_STYLE)}\n{self._brief}"
+            cast = self._cast([u.text for u in units if u.kind == "balloon"])
+            self._brief = "\n".join(part for part in (self._format(COMIC_STYLE), cast, self._brief) if part)
             self._comic = True
             self._context_units, self._following_units = STORY_CONTEXT, STORY_FOLLOWING
         # The names the document itself shows to be names (its screens'
@@ -296,6 +317,52 @@ class LLMTranslator:
             return self._with_user_context("")
         log.info("Document: %s", " ".join(brief.split()))
         return self._with_user_context(brief.strip())
+
+    def _cast(self, texts: list[str]) -> str:
+        """The comic's characters, read from all its text in parts: one line
+        each, with its gender, for every batch's prompt."""
+        parts, current = [], ""
+        for text in texts:
+            if current and len(current) + len(text) > CAST_CHARS:
+                parts.append(current)
+                current = ""
+            current += text + "\n"
+        if current:
+            parts.append(current)
+        schema = {
+            "type": "object",
+            "properties": {
+                "characters": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "gender": {"type": "string", "enum": ["male", "female", "group", "unknown"]},
+                            "about": {"type": "string"},
+                        },
+                        "required": ["name", "gender", "about"],
+                    },
+                },
+            },
+            "required": ["characters"],
+        }
+        cast: list[dict] = []
+        for number, text in enumerate(parts, 1):
+            known = "\n".join(_cast_line(c) for c in cast) or "(none yet)"
+            task = self._format(CAST_PROMPT, part=number, parts=len(parts), known=known, text=self._asked(text))
+            if self.user_context:
+                task = f"Said by the user who asked for the translation:\n{self.user_context}\n\n{task}"
+            try:
+                answer = json.loads(self._chat([{"role": "user", "content": task}], schema=schema, max_tokens=1500))
+                cast = [c for c in answer["characters"] if str(c.get("name", "")).strip()][:CAST_SIZE] or cast
+            except (ValueError, KeyError, LLMError) as error:
+                log.warning("Could not read the comic's characters, part %d (%s)", number, error)
+        if not cast:
+            return ""
+        sheet = "Characters (words for each agree with their gender):\n" + "\n".join(_cast_line(c) for c in cast)
+        log.info("%s", sheet.replace("\n", "; "))
+        return sheet
 
     def _with_user_context(self, brief: str) -> str:
         if not self.user_context:
@@ -726,6 +793,11 @@ def _shifted(index: int, texts: list[str], translations: list[str]) -> bool:
         for position, text in enumerate(texts)
         if position != index
     )
+
+
+def _cast_line(character: dict) -> str:
+    about = str(character.get("about", "")).strip()
+    return f"- {str(character['name']).strip()}: {character.get('gender', 'unknown')}" + (f"; {about}" if about else "")
 
 
 def _clean(answer: str, source: str) -> str:

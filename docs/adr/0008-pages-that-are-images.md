@@ -388,3 +388,25 @@ the case.
 - **A thought balloon's bubbles** are as small as a letter, and were
   erased as an "O" left out. A mark left out must be on the row of one of
   the balloon's lines.
+
+## Revision 2026-11-25: the comic's characters; lettering where the text was
+
+- **Characters:** the user proposed reading the whole comic first and
+  giving the model a general context. Before translating, the comic's
+  text is read in parts of 6000 characters, each completing a list of
+  characters: name, gender, who they are. The list goes with every batch,
+  with the rule that words for a character agree with its gender.
+  - On four pages, the list came out right ("Peter Parker: male;
+    Spider-Man…").
+  - The cover's blurb still came out feminine ("A MAIS INTERESSANTE
+    HERÓI…"), and worse than before. The 8b model's answers vary from run
+    to run, and the context does not fix agreement.
+  - Agreement stays open. A deterministic check (a grammar checker) is the
+    user's decision: it would be a new dependency.
+- **Lettering in two joined balloons** (page 14): the room was one region,
+  and lines centered on it fell on the narrow join, lettered small. Each
+  line now goes to the part of the room that held the original text at
+  its height: the text runs from one balloon to the other, as drawn.
+- **A mark left out** must be on a line's row and within a line height of
+  its ends. A thought balloon's bubble at the height of a line of the
+  balloon beside it was erased (page 14).

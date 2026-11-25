@@ -31,6 +31,7 @@ class FakeLLM(LLMTranslator):
         self.answers = iter(answers)
         self.prompts: list[list[dict]] = []
         self.brief = None  # None: skip the description call
+        self.cast = False  # False: skip reading a comic's characters
         self.spelling = None  # no dictionary download in tests
 
     def _load_spelling(self):
@@ -41,6 +42,9 @@ class FakeLLM(LLMTranslator):
 
     def _describe(self, units):
         return super()._describe(units) if self.brief is not None else ""
+
+    def _cast(self, texts):
+        return super()._cast(texts) if self.cast else ""
 
     def _chat(self, messages, schema=None, max_tokens=1024):
         self.prompts.append(messages)
@@ -660,6 +664,25 @@ def test_a_comics_names_are_kept_and_its_common_phrases_left():
     ]
     assert llm._comic_names(texts) == ["Doctor Octopus"]
     assert "Artificial Arms" in llm.prompts[0][0]["content"]
+
+
+def test_a_comic_is_read_whole_for_its_characters_first(monkeypatch):
+    """Without knowing Spider-Man is a man, the model wrote "A SUPER-HERÓI":
+    the comic is read in parts for its characters and their genders, each
+    part completing the list, and the list goes with every batch."""
+    import doc_translator.translators.llm as llm_module
+
+    monkeypatch.setattr(llm_module, "CAST_CHARS", 30)  # two parts
+    texts = ["He is here!", "He attacks now!", "She worries about him."]
+    first = {"characters": [{"name": "Spider-Man", "gender": "male", "about": "the hero"}, {"name": "Doctor Octopus", "gender": "male", "about": "the villain"}]}
+    second = {"characters": [*first["characters"], {"name": "Aunt May", "gender": "female", "about": "Peter's aunt"}]}
+    llm = FakeLLM([json.dumps(first), json.dumps(second), json.dumps({"translations": ["Ele está aqui!", "Ele ataca agora!", "Ela se preocupa com ele."]})])
+    llm.cast = True
+    llm.translate_units([Unit(t, kind="balloon") for t in texts])
+    assert "Spider-Man: male; the hero" in llm.prompts[1][0]["content"]  # the list so far, to complete
+    batch = llm.prompts[2][1]["content"]
+    assert "words for each agree with their gender" in batch
+    assert "- Aunt May: female; Peter's aunt" in batch and "- Spider-Man: male; the hero" in batch
 
 
 def test_balloons_see_the_story_around_them():

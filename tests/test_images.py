@@ -89,7 +89,8 @@ def test_marks_the_ocr_left_out_of_a_closed_balloon_are_erased(page_image):
     found = balloons.find(image, ocr.read(image))
     first = found[0]
     x0, y0, x1, y1 = first.text_box
-    cv2.circle(image, (x0 - 20, (y0 + y1) // 2), 4, (0, 0, 0), -1)
+    lx0, ly0, _, ly1 = first.lines[0].box
+    cv2.circle(image, (lx0 - 20, (ly0 + ly1) // 2), 4, (0, 0, 0), -1)  # beside a line
     # Under the text, a ring as small as a letter is a thought balloon's
     # bubble (page 14), not an "O" left out.
     cv2.circle(image, ((x0 + x1) // 2 + 60, y1 + 22), 8, (0, 0, 0), 2)
@@ -103,7 +104,7 @@ def test_marks_the_ocr_left_out_of_a_closed_balloon_are_erased(page_image):
     assert first.mask[y1 + 13, x0 + 150]
     clean.erase(image, found)
     assert image[y1 + 13, x0 + 75].max() < 80
-    assert cv2.cvtColor(image[(y0 + y1) // 2 - 6 : (y0 + y1) // 2 + 6, x0 - 26 : x0 - 14], cv2.COLOR_BGR2GRAY).min() > 150
+    assert cv2.cvtColor(image[(ly0 + ly1) // 2 - 6 : (ly0 + ly1) // 2 + 6, lx0 - 26 : lx0 - 14], cv2.COLOR_BGR2GRAY).min() > 150
     assert image[y1 + 50, (x0 + x1) // 2].max() < 80
     assert image[y1 + 22, (x0 + x1) // 2 + 60 - 8].max() < 80  # the bubble's ring
 
