@@ -535,6 +535,8 @@ def test_a_lost_code_is_worse_than_an_invented_word():
             json.dumps({"translations": ["Na solicitação, digite boot upgrade."]}),
             "O endereço é extraído das informações de subrede do 7700FC.",
             "O endereço é extraído das informações de subrede do 7700FC.",
+            # The word still invented: translated alone, still with it.
+            "O endereço é extraído das informações de subrede do 7700FC.",
         ]
     )
     llm.spelling = Spelling(Words({"subrede"}))
@@ -602,6 +604,27 @@ def test_a_compound_translated_in_part_and_a_repeated_word_are_found():
     # Names and repetitions on purpose stay.
     assert compound_parts_left("SPIDER-MAN IS HERE!", "SPIDER-MAN ESTÁ AQUI!", None, words) == []
     assert repeated_words("GO!", "VAI, VAI!") == [] and repeated_words("NO! NO!", "NÃO! NÃO!") == []
+
+
+def test_a_misspelling_left_is_spelled_as_the_checker_suggests():
+    """"VILLÃO" was named and kept by the model: one letter from "VILÃO",
+    LanguageTool's suggestion, it is respelled. A suggestion further away is
+    another word ("REINSERTADO" is not "REINSERÇÃO")."""
+    from doc_translator.spelling import Spelling
+    from doc_translator.translators.llm import _one_edit
+
+    assert _one_edit("villão", "vilão") and not _one_edit("reinsertado", "reinserção")
+
+    class Spell(FakeGrammar):
+        def spelled(self, word):
+            return {"VILLÃO": "vilão"}.get(word, "")
+
+    wrong = "Capturado pelo mais temido VILLÃO do mundo!"
+    llm = FakeLLM([json.dumps({"translations": [wrong]}), wrong, wrong, wrong])
+    llm.spelling = Spelling(Words({"villão"}))
+    llm.grammar = Spell([])
+    result = llm.translate_units([Unit("Captured by the world's most dreaded villain!", kind="balloon")])
+    assert result[0].text == "Capturado pelo mais temido VILÃO do mundo!"
 
 
 def test_a_translation_still_wrong_is_translated_alone_with_a_short_prompt():

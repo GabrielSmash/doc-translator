@@ -551,11 +551,24 @@ class LLMTranslator:
                 # the long prompt itself can be the cause (the 8b model copied
                 # "AMERICA'S" in batches, not alone). Translated on its own,
                 # with a short prompt.
-                if _severity(text, translation, glossary, self._known, self._spelling) >= PLAIN_SEVERITY:
+                invented_left = (
+                    self._spelling.unknown(text, translation, self._known.source_words) if self._spelling and self._known else []
+                )
+                if invented_left or _severity(text, translation, glossary, self._known, self._spelling) >= PLAIN_SEVERITY:
                     plain = self._translate_plain(text, glossary)
                     translation = min(
                         [translation, plain], key=lambda t: _rank(text, t, glossary, self._known, self._spelling)
                     )
+                # Words that still do not exist: the grammar checker's spelling
+                # ("VILLÃO" -> "VILÃO"), when it gives a word of the language.
+                if self._grammar is not None and self._spelling and self._known and (
+                    left := self._spelling.unknown(text, translation, self._known.source_words)
+                ):
+                    respelled = self._respelled(translation, left)
+                    if _rank(text, respelled, glossary, self._known, self._spelling) < _rank(
+                        text, translation, glossary, self._known, self._spelling
+                    ):
+                        translation = respelled
                 if problems := _problems(text, translation, glossary, self._known, self._spelling):
                     log.warning("Check translation of %r (%s): %r", text[:50], problems, translation[:80])
             if self._grammar is not None and translation:
@@ -587,6 +600,22 @@ class LLMTranslator:
                 log.debug("Grammar: %r -> %r", translation, candidate)
                 return candidate
         log.warning("Check translation of %r (grammar: %s): %r", text[:50], "; ".join(e.describe() for e in errors), translation[:80])
+        return translation
+
+    def _respelled(self, translation: str, words: list[str]) -> str:
+        """`translation` with `words` spelled as LanguageTool suggests, each
+        when its suggestion is a word of the target dictionary one letter
+        apart."""
+        for word in words:
+            try:
+                suggestion = self._grammar.spelled(word)
+            except OSError:
+                return translation
+            # One letter apart: a misspelling, not another word ("REINSERTADO"
+            # is not "REINSERÇÃO").
+            if suggestion and _one_edit(word.lower(), suggestion.lower()) and self._spelling.has(suggestion.lower()):
+                fixed = suggestion.upper() if word.isupper() else suggestion
+                translation = re.sub(rf"(?<!\w){re.escape(word)}(?!\w)", fixed, translation)
         return translation
 
     def _grammar_errors(self, text: str) -> list:
@@ -842,6 +871,16 @@ def _shifted(index: int, texts: list[str], translations: list[str]) -> bool:
         for position, text in enumerate(texts)
         if position != index
     )
+
+
+def _one_edit(a: str, b: str) -> bool:
+    """`a` and `b` differ by one letter added, dropped or changed."""
+    if a == b or abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b)) == 1
+    short, long = sorted((a, b), key=len)
+    return any(long[:i] + long[i + 1 :] == short for i in range(len(long)))
 
 
 def _cast_line(character: dict) -> str:

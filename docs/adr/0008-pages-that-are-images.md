@@ -452,3 +452,8 @@ NÃO É", "MINHA COSTAS").
     the source repeats none.
   Both are grave: retried, then translated alone. Neither matched
   anything else in the whole comic.
+- **Words that still do not exist** ("VILLÃO", named to the model and
+  kept) get the translation alone too. As the last step,
+  LanguageTool's spelling suggestion is taken when it is a dictionary word
+  one letter away ("VILÃO"). A suggestion further away is another word
+  ("REINSERTADO" is not "REINSERÇÃO").

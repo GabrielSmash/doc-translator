@@ -75,6 +75,16 @@ class Grammar:
             if m["rule"]["category"]["id"] in CATEGORIES
         ]
 
+    def spelled(self, word: str) -> str:
+        """LanguageTool's first spelling suggestion for `word`, or ""."""
+        data = urllib.parse.urlencode({"language": self.code, "text": word.lower()}).encode()
+        with urllib.request.urlopen(f"http://127.0.0.1:{self._server()}/v2/check", data, timeout=60) as response:
+            matches = json.loads(response.read())["matches"]
+        for match in matches:
+            if match["rule"]["category"]["id"] == "TYPOS" and match["replacements"]:
+                return match["replacements"][0]["value"]
+        return ""
+
     def corrected(self, text: str) -> str:
         """`text` with each error replaced by LanguageTool's first suggestion,
         in the text's case."""
