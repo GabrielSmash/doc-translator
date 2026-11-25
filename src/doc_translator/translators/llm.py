@@ -176,6 +176,7 @@ class LLMTranslator:
         # memory.
         self._all_layers_on_gpu = True
         self._progress = None
+        self._comic = False
         self._brief = ""
         self._names = ""
         self._kept_words: set[str] = set()
@@ -208,6 +209,7 @@ class LLMTranslator:
         self._brief = self._describe(units)
         if any(unit.kind == "balloon" for unit in units):
             self._brief = f"{self._format(COMIC_STYLE)}\n{self._brief}"
+            self._comic = True
             self._context_units, self._following_units = STORY_CONTEXT, STORY_FOLLOWING
         # The names the document itself shows to be names (its screens'
         # items, labels, quoted names), not a list asked of the model: asked,
@@ -458,9 +460,10 @@ class LLMTranslator:
                 invented = self._spelling.unknown(text, translation, self._known.source_words) if self._spelling and self._known else []
                 # An English "'s" on a Portuguese word ("AMÉRICA'S") is one too.
                 invented += english_possessives(text, translation)
+                profane = added_profanity(text, translation)
                 abbreviations = lost_abbreviations(text, translation, self._known)
-                if (missing := missing_tokens(text, translation) + abbreviations + names) or invented:
-                    last = self._translate_one(text, previous, glossary, missing, invented)
+                if (missing := missing_tokens(text, translation) + abbreviations + names) or invented or profane:
+                    last = self._translate_one(text, previous, glossary, missing, invented, profane)
                     translation = min(
                         [translation, last], key=lambda t: _rank(text, t, glossary, self._known, self._spelling)
                     )
@@ -470,10 +473,32 @@ class LLMTranslator:
                     left := self._spelling.unknown(text, translation, self._known.source_words)
                 ):
                     translation = self._spelling.source_words_for(text, translation, left)
+                # Still wrong in the sense or the language after being told:
+                # the long prompt itself can be the cause (the 8b model copied
+                # "AMERICA'S" in batches, not alone). Translated on its own,
+                # with a short prompt.
+                if _severity(text, translation, glossary, self._known, self._spelling) >= PLAIN_SEVERITY:
+                    plain = self._translate_plain(text, glossary)
+                    translation = min(
+                        [translation, plain], key=lambda t: _rank(text, t, glossary, self._known, self._spelling)
+                    )
                 if problems := _problems(text, translation, glossary, self._known, self._spelling):
                     log.warning("Check translation of %r (%s): %r", text[:50], problems, translation[:80])
             results.append(translation or text)
         return results
+
+    def _translate_plain(self, text: str, glossary: Glossary) -> str:
+        """`text` translated alone, with a short prompt: its kind and the
+        names it holds, no document description, context or batch."""
+        kind = "comic book dialogue or narration" if self._comic else "text from a technical document"
+        task = f"Translate into {self.languages.target} this {kind}. Answer with the translation only."
+        if names := [name for name in glossary.kept() if name.lower() in text.lower()]:
+            task += " Keep these names as written: " + ", ".join(names) + "."
+        try:
+            answer = self._chat([{"role": "user", "content": f"{task}\n\n{self._asked(text)}"}], max_tokens=64 + len(text))
+        except LLMError:
+            return ""
+        return self._match_case(text, _clean(answer, text))
 
     def _translate_one(
         self,
@@ -482,6 +507,7 @@ class LLMTranslator:
         glossary: Glossary,
         missing: list[str] | None = None,
         invented: list[str] | None = None,
+        profane: list[str] | None = None,
     ) -> str:
         prompt = self._prompt(f"Translate this text:\n{self._asked(text)}", [text], context, glossary)
         if terms := glossary.relevant(text, self.languages.source):
@@ -508,6 +534,12 @@ class LLMTranslator:
                     f"\n- {self.languages.target} has no 's possessive: write \"the world's greatest hero\" "
                     "as \"the greatest hero of the world\", in the target language."
                 )
+        if profane:
+            prompt[0]["content"] += (
+                "\n- A previous translation used profanity the original does not have: "
+                + ", ".join(profane)
+                + ". Keep the original's register."
+            )
         translation = _clean(self._chat(prompt, max_tokens=64 + len(text)), text)
         return self._match_case(text, translation)
 
@@ -700,6 +732,7 @@ def _clean(answer: str, source: str) -> str:
     """Strip the wrappers small models sometimes add around the answer."""
     text = answer.strip()
     text = re.sub(r"^(tradução|translation)\s*:\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*/no_think\s*$", "", text)  # Qwen3's switch, echoed
     if len(text) > 1 and text[0] == text[-1] and text[0] in "\"'" and source[:1] not in "\"'":
         text = text[1:-1]
     if "\n" not in source:
@@ -746,6 +779,10 @@ def _severity(
     return _check(source, translation, glossary, known, words)[0]
 
 
+# A translation this bad after the retries is translated once more alone
+# (3: left untranslated, in part or as an English possessive).
+PLAIN_SEVERITY = 3
+
 # A word with the English possessive ("AMERICA'S"): Portuguese has none.
 POSSESSIVE = re.compile(r"[^\W\d_][\w-]*['’][sS]\b")
 
@@ -756,6 +793,15 @@ def english_possessives(source: str, translation: str) -> list[str]:
     ("AMÉRICA'S", "MUNDO'S" for "AMERICA'S", "WORLD'S")."""
     kept = {m.group(0).lower() for m in POSSESSIVE.finditer(source)}
     return [m.group(0) for m in POSSESSIVE.finditer(translation) if m.group(0).lower() not in kept]
+
+
+def added_profanity(source: str, translation: str, languages: LanguagePair = EN_PT_BR) -> list[str]:
+    """Profane words of the translation when the source has none: the
+    register changed ("BIG DEAL!" -> "QUE BOSTA!")."""
+    def found(text: str, words: tuple[str, ...]) -> list[str]:
+        return [m.group(0) for w in words for m in re.finditer(rf"\b(?:{w})\b", text, re.IGNORECASE)]
+
+    return [] if found(source, languages.source_profanity) else found(translation, languages.target_profanity)
 
 
 # A text with this many ordinary words (lowercase, 3+ letters) whose words
@@ -797,6 +843,8 @@ def _check(
         return 3, f"first word left untranslated: {word}"
     if possessives := english_possessives(source, translation):
         return 3, "English possessive left: " + ", ".join(possessives)
+    if profanity := added_profanity(source, translation):
+        return 3, "profanity the original does not have: " + ", ".join(profanity)
     # Small models sometimes alter numbers ("RS-232" -> "RS-230") or signs
     # ("100Ω" -> "100<tool_call>"): in a technical document that is worse
     # than an awkward sentence.

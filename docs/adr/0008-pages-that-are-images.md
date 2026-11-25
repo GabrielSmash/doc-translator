@@ -349,3 +349,42 @@ asked that each fix serve the class of the defect, not the case.
     by the row found. It is erased where it was read, turned back onto
     the page.
   - On the comic: 5 lines recovered, all of them real.
+
+## Revision 2026-11-25: checks that fail after the retries; look-alike letters
+
+The possessive came back on a run of four pages ("AMÉRICA'S… MUNDO'S").
+The fix had been a check and a retry, and a retry depends on the model
+following it. The user asked for logic that holds for the class, not for
+the case.
+
+- **A last strategy before warning:** a translation still failing a grave
+  check after the retries (left untranslated, an English possessive,
+  profanity) is translated once more alone, with a short prompt: its kind
+  and the names it holds, without the description, context or batch.
+  - Tried directly, the 8b model kept the "'s" in the long prompt and
+    dropped it alone, in 4 of 4 texts.
+  - The lesser of the two by the checks is kept.
+  - Now: "…CAPTURADO PELO SUPER-VILÃO MAIS TEMIDO DO MUNDO!", "PALESTRA DO
+    TORCH".
+- **Register:** "BIG DEAL!" came back "QUE BOSTA!". Profanity in a
+  translation whose source has none is a grave check. It is named on the
+  last try, and the fallback above applies (now "GRANDE COISA!").
+- **A grammar review by the model** was tried and dropped:
+  - In batches, the 8b model corrected 1 of 47 translations, and for the
+    worse.
+  - On 5 known errors, it corrected none in either capitals or sentence
+    case, and invented "TRUZER".
+  - The 4b model in sentence case corrected 2.
+  - Gender agreement ("A MAIS INTERESSANTE SUPER-HERÓI") is still open.
+- **Look-alike characters:** the class of "I5THAT" (digits for letters)
+  now holds a J or an "!" for an I ("SPEAK-JNG", "!T'S"). An "!" counts
+  only when not after a letter, and when its word is a dictionary word.
+  Initials stay ("J.J.", "J. JONAH").
+- **Common letters read for others** (O for D, L for I): tried one at a
+  time, and taken when the run becomes much likelier by word use.
+  - The gain must be 10 or more, on runs of 5 letters or more. On the
+    comic the right swaps gained 20 or more, the wrong ones 4 to 7.
+  - Now: "DESIGNED", "SPIDER-MAN", "BORED WITH", "STUDIES", "FINDS".
+- **A thought balloon's bubbles** are as small as a letter, and were
+  erased as an "O" left out. A mark left out must be on the row of one of
+  the balloon's lines.

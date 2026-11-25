@@ -25,6 +25,7 @@ class FakeLLM(LLMTranslator):
         self._table_cells = {}
         self._context_units = 3
         self._following_units = 0
+        self._comic = False
         self._known = None
         self._spelling = None
         self.answers = iter(answers)
@@ -561,6 +562,32 @@ def test_an_english_possessive_is_not_left_on_a_portuguese_word():
     )
     result = llm.translate_units([Unit(source)])
     assert result[0].text == "O SUPER-HERÓI MAIS EMOCIONANTE DA AMÉRICA CAPTURADO PELO SUPER-VILÃO MAIS TEMIDO DO MUNDO!"
+
+
+def test_profanity_the_original_does_not_have_is_retried():
+    """"BIG DEAL!" came back "QUE BOSTA!" (page 14): the register changed."""
+    from doc_translator.translators.llm import added_profanity
+
+    assert added_profanity("BIG DEAL!", "QUE BOSTA!") == ["BOSTA"]
+    assert added_profanity("Be careful!", "Cuidado!") == []  # whole words only
+    assert added_profanity("Damn it!", "Droga, merda!") == []  # the original has it
+    llm = FakeLLM([json.dumps({"translations": ["QUE BOSTA!"]}), "QUE BOSTA!", "GRANDE COISA!"])
+    result = llm.translate_units([Unit("BIG DEAL!", kind="balloon")])
+    assert result[0].text == "GRANDE COISA!"
+    assert "profanity the original does not have: BOSTA" in llm.prompts[2][0]["content"]
+
+
+def test_a_translation_still_wrong_is_translated_alone_with_a_short_prompt():
+    """Told of the possessive, the 8b model kept it in the long prompt; alone,
+    with a short one, it did not. That is the last strategy before warning."""
+    source = "AMERICA'S MOST EXCITING SUPER-HERO CAPTURED BY THE WORLD'S MOST DREADED SUPER-VILLAIN!"
+    wrong = "AMÉRICA'S MAIS EMOCIONANTE SUPER-HERÓI CAPTURADO PELO MUNDO'S MAIS TEMIDO SUPER-VILÃO!"
+    right = "O SUPER-HERÓI MAIS EMOCIONANTE DA AMÉRICA CAPTURADO PELO SUPER-VILÃO MAIS TEMIDO DO MUNDO!"
+    llm = FakeLLM([json.dumps({"translations": [wrong]}), wrong, wrong, right + " /no_think"])
+    result = llm.translate_units([Unit(source, kind="balloon")])
+    assert result[0].text == right
+    plain = llm.prompts[-1]
+    assert len(plain) == 1 and "comic book" in plain[0]["content"] and "Preceding" not in plain[0]["content"]
     assert "AMÉRICA'S, MUNDO'S" in llm.prompts[2][0]["content"]
     assert "has no 's possessive" in llm.prompts[2][0]["content"]
 

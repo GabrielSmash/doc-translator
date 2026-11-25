@@ -84,7 +84,8 @@ def _shapes(image: np.ndarray, balloon: Balloon, boxes: np.ndarray) -> tuple[np.
     """The shapes of ink around a balloon's text, widened by INK_PAD:
     those mostly in its lines' boxes (its letters), and the marks the OCR
     left out of them (the dots of "LATER...", an "I" set apart; page 6):
-    shapes as small as a letter, all within a line height of the text.
+    shapes as small as a letter, within a line height of the text, on the
+    row of one of its lines.
     Larger shapes, or running further, are outlines and art: a region taken
     for a balloon can hold a wall its tails reach (page 6)."""
     height, width = image.shape[:2]
@@ -102,7 +103,11 @@ def _shapes(image: np.ndarray, balloon: Balloon, boxes: np.ndarray) -> tuple[np.
         left, top, w, h, area = stats[label]
         sx0, sy0 = x0 + left, y0 + top
         near = sx0 >= tx0 - reach and sy0 >= ty0 - reach and sx0 + w <= tx1 + reach and sy0 + h <= ty1 + reach
-        stray[label] = near and w <= largest and h <= largest
+        # On a line's row: a thought balloon's bubbles, below or beside the
+        # text, are as small as a letter too (page 14).
+        middle = sy0 + h / 2
+        on_row = any(line.box[1] <= middle <= line.box[3] for line in balloon.lines)
+        stray[label] = near and on_row and w <= largest and h <= largest
         lettered[label] = in_boxes[label] >= IN_LINES * area
     widen = np.ones((2 * INK_PAD + 1, 2 * INK_PAD + 1), np.uint8)
     shapes, strays = np.zeros((height, width), np.uint8), np.zeros((height, width), np.uint8)

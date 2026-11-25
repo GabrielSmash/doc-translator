@@ -50,7 +50,13 @@ def respace(text: str, languages: LanguagePair = EN_PT_BR) -> str:
             return " ".join(_split_by_use(match.group(0), dictionary, ranks, hyphen, common))
         return " ".join(_split(match.group(0), dictionary, common, hyphen))
 
-    text = re.sub(r"[A-Za-z0-9']*[A-Za-z][A-Za-z0-9']*", lambda m: _digits_as_letters(m.group(0), dictionary, ranks), text)
+    # A "!" between letters, or starting a word before them, is a misread I.
+    # A J before a period is an initial ("J.JONAH"), not a misread I.
+    text = re.sub(
+        r"(?<![A-Za-z])!?[A-Za-z0-9']*[A-Za-z][A-Za-z0-9']*(?<!J(?=\.))",
+        lambda m: _as_letters(m.group(0), dictionary, ranks),
+        text,
+    )
     text = CENTS.sub(r"\1¢", text)
     return re.sub(rf"[A-Za-z']{{{MIN_RUN},}}", split, text)
 
@@ -58,25 +64,80 @@ def respace(text: str, languages: LanguagePair = EN_PT_BR) -> str:
 # A price in cents, its sign read as a letter ("12t" for the cover's "12¢").
 CENTS = re.compile(r"\b(\d{1,2})[tTcC]\b")
 
-# Digits the OCR reads for letters of hand lettering ("I5THAT", "151T").
-LETTER_LIKE = str.maketrans({"0": "O", "1": "I", "5": "S", "8": "B"})
+# Characters the OCR reads for letters of hand lettering: digits ("I5THAT",
+# "151T"), and a J or an exclamation mark for an I ("SPEAK-JNG", "!T'S").
+LETTER_LIKE = str.maketrans({"0": "O", "1": "I", "5": "S", "8": "B", "J": "I", "!": "I"})
+LOOK_ALIKE = set("01589J!")
 
 
-def _digits_as_letters(word: str, dictionary: Spelling, ranks: dict[str, int] | None) -> str:
-    """`word`, letters and digits, with its digits read as the letters they
-    look like when that makes known words ("I5THAT": "ISTHAT"); else as
-    it is ("12T", "A7OH")."""
-    if not any(c.isdigit() for c in word):
+def _as_letters(word: str, dictionary: Spelling, ranks: dict[str, int] | None) -> str:
+    """`word` with characters the OCR misreads read as the letters they look
+    like, when it is not made of known words as it is and that makes it
+    known words ("I5THAT": "ISTHAT", "SPEAKJNG": "SPEAKING"); else as it is
+    ("12T", "A7OH", "JUST")."""
+    # A letter alone is an initial ("J.J."), not a misread word.
+    if sum(c.isalnum() for c in word) < 2:
         return word
-    letters = word.translate(LETTER_LIKE)
+    if not LOOK_ALIKE & set(word.upper()) or _known_words(word, dictionary, ranks):
+        return _one_letter_swapped(word, dictionary, ranks) or word
+    letters = word.upper().translate(LETTER_LIKE) if word.isupper() or not word.isalpha() else word
     if any(c.isdigit() for c in letters):
         return word
-    words = _split_by_use(letters, dictionary, ranks) if ranks else _split(letters, dictionary, frozenset())
-    known = all(
-        w.lower() in "ai" if len(w) == 1 else dictionary.has(w.lower()) or dictionary.has(w.capitalize())
-        for w in words
-    )
-    return letters if known else word
+    if letters == word or not _known_words(letters, dictionary, ranks):
+        # Common letters read for others ("STUOIES": STUDIES): one at a time.
+        return _one_letter_swapped(letters, dictionary, ranks) or word
+    # An "!" ends a sentence as often as it is an I: read so, it must make one
+    # word ("!T'S": "IT'S"; "!I'M" stays, "II'M" is no word).
+    if "!" in word:
+        if not _known_words(letters, dictionary, ranks):
+            return word
+        pieces = _split_by_use(letters, dictionary, ranks) if ranks else _split(letters, dictionary, frozenset())
+        first = pieces[0].lower()
+        return letters if len(first) > 1 and dictionary.has(first) else word
+    return letters if _known_words(letters, dictionary, ranks) else word
+
+
+# Letters of hand lettering the OCR reads for others: tried one at a time.
+LETTER_SWAPS = {"O": "D", "D": "O", "L": "I", "I": "L"}
+# A swap is taken when it makes the run this much likelier (the sum of
+# log(rank) of its words, see _split_by_use), on runs this long.
+# On the comic, the right ones gained 20 or more ("STUDIES", "BORED WITH"),
+# the wrong ones 4 to 7 ("I OWE" -> "LOWE", "DR" -> "OR").
+SWAP_GAIN = 10.0
+SWAP_MIN = 5
+
+
+def _one_letter_swapped(run: str, dictionary: Spelling, ranks: dict[str, int] | None) -> str | None:
+    """`run` with one letter read as the one it looks like, when that makes
+    it much more likely words ("STUOIES": "STU OI ES" are words, rare ones;
+    "STUDIES" is common). Needs the word ranks."""
+    if not ranks or not run.isupper() or not run.replace("'", "").isalpha() or len(run) < SWAP_MIN:
+        return None
+    cost, _ = _split_by_use(run, dictionary, ranks, common=COMMON, with_cost=True)
+    best = None
+    for index, char in enumerate(run):
+        if swap := LETTER_SWAPS.get(char):
+            candidate = run[:index] + swap + run[index + 1 :]
+            candidate_cost, _ = _split_by_use(candidate, dictionary, ranks, common=COMMON, with_cost=True)
+            if candidate_cost < cost - SWAP_GAIN and (best is None or candidate_cost < best[0]):
+                best = (candidate_cost, candidate)
+    return best[1] if best else None
+
+
+def _known_words(run: str, dictionary: Spelling, ranks: dict[str, int] | None) -> bool:
+    """Whether `run` splits into known words (letters only)."""
+    if not run.replace("'", "").isalpha():
+        return False
+    words = _split_by_use(run, dictionary, ranks) if ranks else _split(run, dictionary, frozenset())
+    return all(_known(w, dictionary) for w in words)
+
+
+def _known(word: str, dictionary: Spelling) -> bool:
+    """A word of the dictionary, a contraction of one ("IT'S"), or "a", "I"."""
+    base = word.lower().split("'")[0] or word.lower()
+    if len(base) == 1:
+        return base in "ai"
+    return dictionary.has(base) or dictionary.has(base.capitalize())
 
 
 def _split(run: str, dictionary: Spelling, common: frozenset[str], hyphen: bool = False) -> list[str]:
@@ -123,8 +184,13 @@ MISREAD = {"l": "I"}
 
 
 def _split_by_use(
-    run: str, dictionary: Spelling, ranks: dict[str, int], hyphen: bool = False, common: frozenset[str] = frozenset()
-) -> list[str]:
+    run: str,
+    dictionary: Spelling,
+    ranks: dict[str, int],
+    hyphen: bool = False,
+    common: frozenset[str] = frozenset(),
+    with_cost: bool = False,
+):
     """The words of `run` most likely together: the least total cost, a
     word's cost being log(rank * log N). A word the dictionary has and the
     list lacks costs as the rarest; one only the list has (frequent
@@ -179,4 +245,4 @@ def _split_by_use(
                     piece, written = MISREAD[piece].lower(), MISREAD[piece]
                 options.append((total + cost(piece, end == len(run)), words + 1, [*parts, written]))
         best[end] = min(options, key=lambda option: option[:2])
-    return best[-1][2]
+    return (best[-1][0], best[-1][2]) if with_cost else best[-1][2]

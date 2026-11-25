@@ -57,6 +57,11 @@ class LanguagePair:
     # Abbreviations the target language writes its own way ("USA" ->
     # "EUA"): not dropped when the translation has them so.
     translated_abbreviations: tuple[tuple[str, str], ...] = ()
+    # Profanity: in a translation whose source has none, the model changed
+    # the register ("BIG DEAL!" -> "QUE BOSTA!"). Regular expressions of
+    # whole words.
+    source_profanity: tuple[str, ...] = ()
+    target_profanity: tuple[str, ...] = ()
 
     def localize_dates(self, source: str, translation: str) -> str:
         """`translation` with the source's month abbreviations, still written
@@ -102,6 +107,10 @@ Boot Loader => KEEP""",
         "nos", "nas", "para", "por", "com", "ao", "aos", "à", "às", "um", "uma",
     }),
     kept_abbreviations=frozenset({"N/A"}),
+    source_profanity=(r"shit\w*", r"fuck\w*", r"damn\w*", "hell", r"bitch\w*", r"bastards?", "ass", "crap", r"piss\w*"),
+    target_profanity=(
+        "bosta", "merda", "porra", r"caralh\w*", r"fod\w+", r"puta?s?", "cacete", "cu", r"desgraç\w*",
+    ),
     source_only_starts=frozenset({
         "the", "to", "press", "if", "when", "this", "these", "those", "for", "with",
         "click", "select", "enter", "type", "connect", "make", "upon", "after",

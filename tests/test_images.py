@@ -90,6 +90,10 @@ def test_marks_the_ocr_left_out_of_a_closed_balloon_are_erased(page_image):
     first = found[0]
     x0, y0, x1, y1 = first.text_box
     cv2.circle(image, (x0 - 20, (y0 + y1) // 2), 4, (0, 0, 0), -1)
+    # Under the text, a ring as small as a letter is a thought balloon's
+    # bubble (page 14), not an "O" left out.
+    cv2.circle(image, ((x0 + x1) // 2 + 60, y1 + 22), 8, (0, 0, 0), 2)
+    assert first.mask[y1 + 22, (x0 + x1) // 2 + 60]
     # Away from the text, a mark is art the region holds (a door, page 6).
     cv2.circle(image, ((x0 + x1) // 2, y1 + 50), 4, (0, 0, 0), -1)
     assert first.mask[y1 + 50, (x0 + x1) // 2]
@@ -101,6 +105,7 @@ def test_marks_the_ocr_left_out_of_a_closed_balloon_are_erased(page_image):
     assert image[y1 + 13, x0 + 75].max() < 80
     assert cv2.cvtColor(image[(y0 + y1) // 2 - 6 : (y0 + y1) // 2 + 6, x0 - 26 : x0 - 14], cv2.COLOR_BGR2GRAY).min() > 150
     assert image[y1 + 50, (x0 + x1) // 2].max() < 80
+    assert image[y1 + 22, (x0 + x1) // 2 + 60 - 8].max() < 80  # the bubble's ring
 
 
 def open_balloon_page() -> np.ndarray:
@@ -185,6 +190,16 @@ def test_digits_read_for_letters_are_letters_again():
     assert respace("OUR AGREEMENT, J.J., I5THATYOU'RE NEVER") == "OUR AGREEMENT, J.J., IS THAT YOU'RE NEVER"
     assert respace("WHAT YOU DON'T 151T?") == "WHAT YOU DON'T IS IT?"
     assert respace("ROOM 1201, IN 1963") == "ROOM 1201, IN 1963"  # numbers stay
+    # A J or an "!" read for an I ("SPEAK-ING", page 14; "IT'S", page 6);
+    # initials and sentences' ends stay.
+    assert respace(join(["HE'S SPEAK-", "JNG TO OUR"])) == "HE'S SPEAKING TO OUR"
+    assert respace("SEE?BUT !T'STRUE!I'M") == "SEE?BUT IT'S TRUE!I'M"
+    assert respace("JUST A JOKE, J.J.! HEY!WAIT") == "JUST A JOKE, J.J.! HEY!WAIT"
+    # A common letter read for another, when that makes much likelier words
+    # ("STUOIES", page 14); likely words as they are stay ("DR.", "I OWE").
+    assert respace("DOYOURBESTINYOURSTUOIES!") == "DO YOUR BEST IN YOUR STUDIES!"
+    assert respace("I GROW BOREOWITH THIS GAME!") == "I GROW BORED WITH THIS GAME!"
+    assert respace("THEPIXOFDR.OCTOPUS! ANDIOWEYOU") == "THE PIX OF DR.OCTOPUS! AND I OWE YOU"
     # The price: a cents sign the OCR read as a letter (the cover's "12¢").
     assert respace("MARVEL COMICS 12t GROUP") == "MARVEL COMICS 12¢ GROUP"
 
