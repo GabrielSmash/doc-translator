@@ -14,9 +14,10 @@ from .balloons import Balloon
 FONT_DIR = files("doc_translator.images") / "fonts"
 FONT = "ComicNeue-Bold.ttf"
 FONT_NAME = "comicneue"
-# Font size for an OCR line box this tall: the box holds the capitals and
-# some room.
-SIZE_PER_LINE = 0.95
+# Font size for an OCR line box this tall, when the capitals could not be
+# measured: the box holds the capitals and some room (they are 61% of it in
+# the comic).
+SIZE_PER_LINE = 0.9
 LEADING = 1.12
 # Kept from the outline, in font sizes.
 MARGIN = 0.45
@@ -24,8 +25,9 @@ MARGIN = 0.45
 STEPS = [1 - 0.05 * i for i in range(11)]
 # Below this share of the original size, the text is reported.
 MIN_SCALE = 0.6
-# How far the capitals of Comic Neue reach above the baseline, in sizes.
-CAP = 0.72
+# How far the capitals of Comic Neue reach above the baseline, in sizes
+# (measured on its "H").
+CAP = 0.68
 
 
 @cache
@@ -36,12 +38,15 @@ def _font() -> pymupdf.Font:
 def write(page: pymupdf.Page, balloon: Balloon, text: str, scale: float) -> float:
     """Letter `text` (in capitals) in `balloon` on `page` (`prepare`d); `scale`: page
     units per image pixel. Returns the size used, as a share of the
-    original's (below MIN_SCALE when even the smallest did not fit)."""
+    original's (below MIN_SCALE when even the smallest did not fit). The
+original is the size whose capitals are as tall as the balloon's, in their
+color."""
     words = text.upper().split()
     if not words:
         return 1.0
     room = _room(balloon)
-    base = balloon.line_height * SIZE_PER_LINE
+    base = balloon.cap_height / CAP if balloon.cap_height else balloon.line_height * SIZE_PER_LINE
+    blue, green, red = balloon.ink
     tx0, ty0, tx1, ty1 = balloon.text_box
     center = ((tx0 + tx1) / 2, (ty0 + ty1) / 2)
     for step in STEPS:
@@ -52,7 +57,7 @@ def write(page: pymupdf.Page, balloon: Balloon, text: str, scale: float) -> floa
     size = base * step
     for text_line, x, baseline in lines:
         page.insert_text(
-            (x * scale, baseline * scale), text_line, fontname=FONT_NAME, fontsize=size * scale, color=(0, 0, 0)
+            (x * scale, baseline * scale), text_line, fontname=FONT_NAME, fontsize=size * scale, color=(red / 255, green / 255, blue / 255)
         )
     return step
 

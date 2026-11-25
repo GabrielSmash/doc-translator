@@ -7,7 +7,8 @@ inside a letter's hole) gives that region; lines that reach the same
 region are one balloon. A region much larger than its text is open (its
 outline has a gap, or there is none): only the lines' boxes count then.
 Text over the art (titles, sound effects) reaches no flat region and is
-left as it is.
+left as it is. The letters are measured too: their color and the height of
+their capitals, which the translation is lettered with.
 """
 
 import itertools
@@ -45,6 +46,12 @@ RECTANGLE_FILL = 0.9
 # The room inside an ellipse: its inscribed box, from each side.
 ELLIPSE_INSET = 0.15
 ROOM_MARGIN = 10
+# Letters differ from their balloon's color by this much at least (a
+# distance in BGR); JPEG noise and antialiasing stay under it.
+INK_DISTANCE = 40
+# A capital is at least this share of its OCR line's box (punctuation,
+# commas and bits of noise are less).
+MIN_CAP_SHARE = 0.4
 
 
 @dataclass
@@ -58,6 +65,8 @@ class Balloon:
     # An open balloon's room: its region near its text (the mask is for
     # closed balloons, whose whole inside is erased within).
     room_mask: np.ndarray | None = field(default=None, repr=False)
+    ink: tuple[int, int, int] = (0, 0, 0)  # the letters' color, BGR
+    cap_height: float = 0.0  # the letters' capitals, in pixels; 0 if not measured
 
     @property
     def text_box(self) -> tuple[int, int, int, int]:
@@ -231,7 +240,36 @@ def _balloon(image: np.ndarray, lines: list[TextLine], inside: np.ndarray) -> Ba
         balloon.mask = _solid(inside)
         # With its letters: a caption fills its box whatever its text.
         balloon.round = np.count_nonzero(balloon.mask) < RECTANGLE_FILL * (x1 - x0 + 1) * (y1 - y0 + 1)
+    balloon.ink, balloon.cap_height = _lettering(image, balloon.lines, balloon.color)
     return balloon
+
+
+def _lettering(
+    image: np.ndarray, lines: list[TextLine], background: tuple[int, int, int]
+) -> tuple[tuple[int, int, int], float]:
+    """The letters' color (the middle of their strokes: their edges blend
+    into the balloon) and the height of their capitals: the median height
+    of the shapes in each line's box that are letter-high and do not touch
+    its top or bottom (an outline crossing the box does)."""
+    cores, heights = [], []
+    for line in lines:
+        x0, y0, x1, y1 = (max(0, v) for v in line.box)
+        crop = image[y0:y1, x0:x1]
+        if crop.size == 0:
+            continue
+        distance = np.linalg.norm(crop.astype(np.float32) - np.array(background, np.float32), axis=2)
+        scaled = np.clip(distance, 0, 255).astype(np.uint8)
+        threshold, _ = cv2.threshold(scaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        letters = (scaled > max(threshold, INK_DISTANCE)).astype(np.uint8)
+        cores.append(crop[cv2.erode(letters, np.ones((2, 2), np.uint8)) > 0])
+        count, _, stats, _ = cv2.connectedComponentsWithStats(letters, connectivity=8)
+        box_height = y1 - y0
+        for top, height in stats[1:count, [cv2.CC_STAT_TOP, cv2.CC_STAT_HEIGHT]]:
+            if height >= MIN_CAP_SHARE * box_height and top > 0 and top + height < box_height:
+                heights.append(height)
+    pixels = np.concatenate(cores) if cores else np.empty((0, 3))
+    ink = tuple(int(v) for v in np.median(pixels, axis=0)) if len(pixels) else (0, 0, 0)
+    return ink, float(np.median(heights)) if heights else 0.0
 
 
 def panels(gray: np.ndarray) -> list[tuple[int, int, int, int]]:

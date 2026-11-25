@@ -19,7 +19,7 @@ WIDTH, HEIGHT = 1200, 900
 LETTERING = f"@font-face {{font-family: comic; src: url({FONT});}} p {{font-family: comic; text-align: center; font-size: 30px; margin: 0;}}"
 
 
-def comic_page() -> bytes:
+def comic_page(caption_ink: str = "#000") -> bytes:
     """Two panels; a round balloon in the first, a caption box and a
     balloon in the second. Drawn as vectors, then flattened to an image."""
     drawn = pymupdf.open()
@@ -30,7 +30,7 @@ def comic_page() -> bytes:
     page.draw_oval(pymupdf.Rect(90, 100, 530, 360), color=(0, 0, 0), fill=(1, 1, 1), width=5)
     page.insert_htmlbox(pymupdf.Rect(160, 160, 460, 320), "<p>THE MACHINE IS READY! NOW WE WAIT.</p>", css=LETTERING, archive=archive)
     page.draw_rect(pymupdf.Rect(640, 60, 1140, 170), color=(0, 0, 0), fill=(1, 1, 0.6), width=4)
-    page.insert_htmlbox(pymupdf.Rect(660, 75, 1120, 165), "<p>LATER, IN THE LAB...</p>", css=LETTERING, archive=archive)
+    page.insert_htmlbox(pymupdf.Rect(660, 75, 1120, 165), f'<p style="color: {caption_ink}">LATER, IN THE LAB...</p>', css=LETTERING, archive=archive)
     page.draw_oval(pymupdf.Rect(680, 420, 1100, 680), color=(0, 0, 0), fill=(1, 1, 1), width=5)
     page.insert_htmlbox(pymupdf.Rect(750, 480, 1030, 640), "<p>WHERE IS THE KEY?</p>", css=LETTERING, archive=archive)
     picture = page.get_pixmap(dpi=72)
@@ -172,6 +172,43 @@ def test_a_comic_page_is_translated_in_its_balloons(tmp_path):
     out = pymupdf.open(tmp_path / "out.pdf")
     written = out[0].get_text()
     assert "TRADUZIDO 0" in written and "TRADUZIDO 2" in written
+
+
+def test_the_translation_is_lettered_as_tall_and_in_the_color_of_the_original(tmp_path):
+    """Lettered 30 px high in red on the caption, black in the balloons: the
+    translation's capitals as tall as the original's, in their color."""
+    from doc_translator.pipeline import translate_pdf
+
+    class Short:
+        cache_id = "short"
+
+        def translate_units(self, units):
+            return [UnitTranslation("OI", []) for _ in units]
+
+    source = tmp_path / "comic.pdf"
+    source.write_bytes(comic_page(caption_ink="#c00000"))
+    doc = pymupdf.open(source)
+    data = doc.extract_image(doc[0].get_image_info(xrefs=True)[0]["xref"])["image"]
+    image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    found = balloons.find(image, ocr.read(image))
+    capitals = 30 * 0.68  # Comic Neue's capitals at 30 px
+    assert all(abs(b.cap_height - capitals) <= 2 for b in found)
+    caption = next(b for b in found if not b.round)
+    blue, green, red = caption.ink
+    assert red > 150 and green < 80 and blue < 80
+
+    translate_pdf(source, tmp_path / "out.pdf", Short())
+    spans = [
+        span
+        for block in pymupdf.open(tmp_path / "out.pdf")[0].get_text("dict")["blocks"]
+        for line in block.get("lines", [])
+        for span in line["spans"]
+    ]
+    assert len(spans) == 3
+    assert all(abs(span["size"] - 30) <= 2 for span in spans)
+    colors = sorted(span["color"] for span in spans)
+    assert colors[0] < 0x303030 and colors[1] < 0x303030  # the balloons: black
+    assert colors[2] >> 16 > 150 and (colors[2] >> 8) & 0xFF < 80  # the caption: red
 
 
 def test_a_text_the_translation_leaves_as_it_is_keeps_its_letters(tmp_path):

@@ -131,3 +131,31 @@ joined:
 - p8: "WELL, WELL!";
 - p6: the thought balloon;
 - p1: the cover's texts.
+
+## Revision 2026-11-25: the lettering measured
+
+The style of the comic's 251 texts was measured: letter color, height of
+the capitals, stroke and slant.
+
+- **Color:** the letters of every balloon and caption are dark. Only the
+  cover's starburst (red on yellow) and an ad (blue) are not. The
+  translation was always lettered black.
+- **Size:** the capitals fill 61% of their OCR box. The translation was
+  sized from the box with a guessed share, and lettered about 6% larger
+  than the original.
+- **Stroke and slant:** these do not vary from balloon to balloon. The
+  plain lettering's stroke is 17–18% of its height everywhere. What is
+  bold and slanted are emphasized words inside a balloon ("MY **ARMS** DID
+  IT!"), in 31 of 235 balloons at least.
+
+Decisions:
+
+- **Color:** each balloon's letters are measured: the pixels far from its
+  color, at the middle of their strokes. The translation is lettered in
+  that color.
+- **Size:** the capitals' height is measured from the letter shapes in
+  each line, leaving out the ones touching the line's edges (an outline).
+  The translation's capitals are as tall: a size of height / 0.68, which
+  is Comic Neue's capital height, measured on its "H".
+- **Bold and italic per balloon:** not detected. Emphasis is per word,
+  and is a decision of its own.
