@@ -16,6 +16,9 @@ class TextLine:
     # comic, -13 and 8); its box is then taller than its letters.
     angle: float = 0.0
     height: float = 0.0  # across the line, when slanted; 0: the box's height
+    # The OCR's quadrilateral around a slanted line (its box also holds
+    # the corners of the lines above and below).
+    quad: tuple[tuple[int, int], ...] | None = None
 
     @property
     def letter_height(self) -> float:
@@ -53,7 +56,20 @@ def read(image: np.ndarray) -> list[TextLine]:
         if abs(angle) >= SLANTED:
             line.angle = angle
             line.height = (math.dist(box[0], box[3]) + math.dist(box[1], box[2])) / 2
+            line.quad = tuple((int(x), int(y)) for x, y in box)
         lines.append(_again(image, line) if line.score < RETRY_SCORE else line)
+    return lines
+
+
+def read_crop(image: np.ndarray) -> list[TextLine]:
+    """Lines of a small image (a part of a page read again), as read: no
+    second reading of unsure lines."""
+    result, _ = _engine()(image)
+    lines = []
+    for box, text, score in result or []:
+        xs = [point[0] for point in box]
+        ys = [point[1] for point in box]
+        lines.append(TextLine((int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))), text, float(score)))
     return lines
 
 
@@ -67,7 +83,7 @@ def _again(image: np.ndarray, line: TextLine) -> TextLine:
         # A reading that only drops characters tells nothing new and loses
         # what it drops ("12t", the cover's "12¢", read again "12").
         if score > line.score and score >= RETRY_SCORE and text.strip() and not _drops(line.text, text):
-            return TextLine(line.box, text, score, line.angle, line.height)
+            return TextLine(line.box, text, score, line.angle, line.height, line.quad)
     return line
 
 

@@ -488,6 +488,61 @@ def test_a_slanted_text_is_lettered_slanted(tmp_path):
         assert 8 <= math.degrees(math.atan2(dy, dx)) <= 12
 
 
+def loose_text_page() -> np.ndarray:
+    """A panel and, on the page's white around it, a red balloon with white
+    letters, a line of lettering, and print: a web address, a page number."""
+    drawn = pymupdf.open()
+    page = drawn.new_page(width=WIDTH, height=HEIGHT)
+    font = str(FONT_DIR / FONT)
+    page.draw_rect(pymupdf.Rect(40, 40, 580, 600), color=(0, 0, 0), fill=(0.55, 0.75, 0.9), width=6)
+    page.draw_oval(pymupdf.Rect(640, 80, 1120, 380), color=(0, 0, 0), fill=(0.9, 0.1, 0.1), width=5)
+    for i, line in enumerate(("CAN ANYTHING THAT", "LIVES DEFEAT THE", "MIGHTY OCTOPUS?")):
+        width = pymupdf.Font(fontfile=font).text_length(line, fontsize=30)
+        page.insert_text((880 - width / 2, 200 + 34 * i), line, fontsize=30, fontfile=font, fontname="c", color=(1, 1, 1))
+    page.insert_text((660, 700), "FANTASY! THRILLS!", fontsize=30, fontfile=font, fontname="c")
+    page.insert_text((80, 820), "www.example.com", fontsize=26, fontname="helv")
+    page.insert_text((1100, 860), "7", fontsize=26, fontname="helv")
+    picture = page.get_pixmap(dpi=72)
+    return cv2.imdecode(np.frombuffer(picture.tobytes("png"), np.uint8), cv2.IMREAD_COLOR)
+
+
+def test_text_on_a_dark_balloon_and_lettering_on_the_page_are_found():
+    """Light letters on a dark balloon (the cover's red question mark) and
+    lettering on the page's white with nothing around it ("FANTASY!
+    THRILLS!", page 2) are texts; print on the page (a web address, a page
+    number) is not."""
+    image = loose_text_page()
+    found = balloons.find(image, ocr.read(image))
+    texts = sorted(respace(join([line.text for line in b.lines])).replace(" ", "") for b in found)
+    assert texts == ["CANANYTHINGTHATLIVESDEFEATTHEMIGHTYOCTOPUS?", "FANTASY!THRILLS!"]
+    red = next(b for b in found if b.lines[0].text.startswith("CAN"))
+    blue, green, red_ = red.color
+    assert red_ > 180 and green < 80 and blue < 80
+    assert min(red.ink) > 200  # lettered again in white
+
+
+def test_a_line_the_ocr_missed_is_read_again(page_image):
+    """The page's OCR can leave out a line of a balloon ("OCTOPUS??" on the
+    cover, slanted more than the others; "WITH HIM? HE DIDN'T ANSWER!"):
+    letters near the balloon's text that no line holds are read again."""
+    from doc_translator.images import missed
+
+    lines = ocr.read(page_image)
+    first = balloons.find(page_image, lines)[0]
+    assert len(first.lines) >= 2
+    left_out = first.lines[-1]
+    lines = [line for line in lines if line is not left_out]
+    found = balloons.find(page_image, lines)
+    balloon = found[0]
+    added = missed.complete(page_image, balloon, lines, found)
+    assert added is not None
+    assert added.text.replace(" ", "") == left_out.text.replace(" ", "")
+    assert balloon.lines[-1] is added
+    # Nothing else is left out, in it or in the other balloons.
+    lines.append(added)
+    assert all(missed.complete(page_image, b, lines, found) is None for b in found)
+
+
 def test_a_text_the_translation_leaves_as_it_is_keeps_its_letters(tmp_path):
     """A number, a name, a web address: erased and lettered again the same,
     it would only lose the original lettering."""

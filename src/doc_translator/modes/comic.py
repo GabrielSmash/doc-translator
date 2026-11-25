@@ -10,7 +10,7 @@ import pymupdf
 
 from ..align import locate
 from ..images import balloons as balloons_
-from ..images import clean, emphasis, image_pages, ocr, typeset
+from ..images import clean, emphasis, image_pages, missed, ocr, typeset
 from ..images.text import join, respace
 from ..result import Result
 from ..translators.base import Translator, Unit
@@ -54,7 +54,17 @@ def translate_pages(doc: pymupdf.Document, pages: list[int], translator: Transla
         info = page.get_image_info(xrefs=True)[0]
         data = doc.extract_image(info["xref"])["image"]
         image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
-        found.append((page, info, image, balloons_.find(image, ocr.read(image))))
+        page_lines = ocr.read(image)
+        page_balloons = balloons_.find(image, page_lines)
+        for balloon in page_balloons:
+            # A line read again can be part of what was missed ("DID" of
+            # "DID I DO??"): looked for again until nothing is left out.
+            for _ in range(missed.TRIES):
+                if not (added := missed.complete(image, balloon, page_lines, page_balloons)):
+                    break
+                page_lines.append(added)  # one balloon's, not the next's
+                log.info("Page %d: a line the OCR missed read again: %s", page.number + 1, added.text)
+        found.append((page, info, image, page_balloons))
     lettering = float(np.median([b.line_height for *_, page_balloons in found for b in page_balloons] or [0]))
     for page, _, _, page_balloons in found:
         page_balloons[:] = [b for b in page_balloons if not (b.open and b.line_height > DISPLAY_HEIGHT * lettering)]

@@ -23,8 +23,19 @@ from .ocr import TextLine
 DARK = 110
 # Pixels lighter than this can be a balloon's inside.
 LIGHT = 170
-# A region larger than this share of the page is the page, not a balloon.
+# A region larger than this share of the page is the page, not a balloon:
+# only text with the region all around it is read there.
 MAX_PAGE_SHARE = 0.15
+FLAT_AROUND = 0.9
+# Text there is comic lettering when this share of its letters are capitals
+# and it has this many letters.
+LETTERED_SHARE = 0.8
+LETTERED_MIN = 3
+# Pixels of a dark balloon differ from its color by this much at most, per
+# channel (JPEG noise); its letters and outline, by much more.
+COLOR_TOLERANCE = 40
+# Pixels darker than this are ink: outlines and letters, not a balloon's color.
+INK = 60
 # A region at least this many times its line's box holds that line.
 MIN_REGION_SHARE = 1.5
 # A region this much larger than its text (and this many pixels more) is
@@ -117,14 +128,58 @@ def find(image: np.ndarray, lines: list[TextLine]) -> list[Balloon]:
         regions[number] = {"area": int(filled.sum()), "box": (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max()))}
         return number
 
+    def colored_region_at(x: int, y: int) -> int:
+        """The region of `image`'s color at (x, y): pixels near it, reached
+        without crossing others (letters lighter than their balloon, an
+        outline)."""
+        if region_of[y, x]:
+            return int(region_of[y, x])
+        mask = np.zeros((height + 2, width + 2), np.uint8)
+        tolerance = (COLOR_TOLERANCE,) * 3
+        flags = 4 | cv2.FLOODFILL_FIXED_RANGE | cv2.FLOODFILL_MASK_ONLY | (255 << 8)
+        cv2.floodFill(image, mask, (x, y), 0, tolerance, tolerance, flags)
+        filled = mask[1:-1, 1:-1] > 0
+        number = len(regions) + 1
+        region_of[filled & (region_of == 0)] = number
+        ys, xs = np.nonzero(filled)
+        regions[number] = {
+            "area": int(filled.sum()),
+            "box": (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())),
+            "colored": True,
+        }
+        return number
+
     for line in lines:
         x0, y0, x1, y1 = line.box
         step = max(1, (x1 - x0) // SEEDS)
         votes: dict[int, int] = {}
-        for x in range(max(0, x0), min(width, x1), step):
-            for y in (y0 - SEED_OFFSET, y1 + SEED_OFFSET):
-                if 0 <= y < height and gray[y, x] > LIGHT:
-                    number = region_at(x, y)
+        seeds = [
+            (x, y)
+            for x in range(max(0, x0), min(width, x1), step)
+            for y in (y0 - SEED_OFFSET, y1 + SEED_OFFSET)
+            if 0 <= y < height
+        ]
+        # Light seeds are a light balloon's inside, unless on both sides of
+        # the line most seeds are of a middle tone: a dark balloon, its light
+        # seeds on letters of the lines next to it (the cover's red question
+        # mark). One side can be out of a light balloon hugging its text
+        # (the panel's yellow above "MY WEB!", page 9). Black seeds are
+        # outlines and letters, in either.
+        light = [(x, y) for x, y in seeds if gray[y, x] > LIGHT]
+        sides = [[gray[y, x] for x, y in seeds if y == side] for side in (y0 - SEED_OFFSET, y1 + SEED_OFFSET)]
+        dark_balloon = all(sum(INK < g <= LIGHT for g in side) > sum(g > LIGHT for g in side) for side in sides if side)
+        for x, y in [] if dark_balloon else light:
+            number = region_at(x, y)
+            if regions[number]["area"] >= MIN_REGION_SHARE * (x1 - x0) * (y1 - y0):
+                votes[number] = votes.get(number, 0) + 1
+        if not votes and _lettered(line.text):
+            # No light inside around the line: a balloon of a dark color, its
+            # letters lighter (white on the cover's red question mark). Its
+            # region is the one of its color, not of light pixels. Dark art
+            # holds page numbers and marks too: only lettering is read there.
+            for x, y in seeds:
+                if gray[y, x] <= LIGHT:
+                    number = colored_region_at(x, y)
                     if regions[number]["area"] >= MIN_REGION_SHARE * (x1 - x0) * (y1 - y0):
                         votes[number] = votes.get(number, 0) + 1
         if votes:
@@ -135,17 +190,23 @@ def find(image: np.ndarray, lines: list[TextLine]) -> list[Balloon]:
             owner = min(holding, key=lambda n: regions[n]["area"]) if holding else max(votes, key=votes.get)
             owners.setdefault(owner, []).append(line)
 
+    _merge_colored(owners, regions, region_of, image)
     balloons = []
     for number, own in owners.items():
         region = regions[number]
-        if region["area"] > MAX_PAGE_SHARE * width * height:
-            continue  # text over the page's art
         whole = region_of == number
+        if region["area"] > MAX_PAGE_SHARE * width * height:
+            # The page's background, or a panel's: text written on it with
+            # nothing around ("FANTASY! THRILLS!", a caption in the margin)
+            # is open text, the rest is over the art.
+            own = [line for line in own if _flat_around(line, whole, lines) and _lettered(line.text)]
+            if not own:
+                continue
         # One region can hold several texts: balloons touching each other,
         # a thought balloon whose outline has gaps under a caption (page 6),
         # a cover's sky under its blurbs. Each text gets the part of the
         # region on its side.
-        groups = _groups(own, walls)
+        groups = _groups(own, _walls_in(image, whole, walls) if region.get("colored") else walls)
         for group in groups:
             inside = whole.copy()
             for other in groups:
@@ -153,6 +214,57 @@ def find(image: np.ndarray, lines: list[TextLine]) -> list[Balloon]:
                     _cut(inside, _box(group), _box(other))
             balloons.append(_balloon(image, group, inside))
     return reading_order(balloons, panels(gray))
+
+
+def _merge_colored(owners: dict[int, list[TextLine]], regions: dict[int, dict], region_of: np.ndarray, image: np.ndarray) -> None:
+    """Join the regions of a dark balloon its light letters cut apart.
+
+    Lines lettered tight in a dark balloon (the cover's red question mark)
+    leave thin strips of its color between them, each a region of its own.
+    Regions of one color whose lines are one text (near each other, one
+    under the other) are one balloon."""
+    numbers = [n for n in owners if regions[n].get("colored")]
+    color = {n: np.array(_color(image, region_of == n), int) for n in numbers}
+    no_walls = np.zeros(region_of.shape, np.uint8)
+    for a, b in itertools.combinations(numbers, 2):
+        if a not in owners or b not in owners:
+            continue
+        if np.abs(color[a] - color[b]).max() > COLOR_TOLERANCE:
+            continue
+        if any(_linked(x, y, no_walls) for x in owners[a] for y in owners[b]):
+            owners[a] += owners.pop(b)
+            region_of[region_of == b] = a
+            regions[a]["area"] += regions[b]["area"]
+
+
+def _walls_in(image: np.ndarray, region: np.ndarray, walls: np.ndarray) -> np.ndarray:
+    """The outlines of a dark balloon: pixels darker than its color (its own
+    color is darker than DARK, its letters lighter)."""
+    color = np.array(_color(image, region), np.int16)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY).astype(np.int16)
+    own = int(cv2.cvtColor(color.astype(np.uint8).reshape(1, 1, 3), cv2.COLOR_BGR2GRAY)[0, 0])
+    return np.where(gray < own - COLOR_TOLERANCE, 255, 0).astype(np.uint8) & walls
+
+
+def _lettered(text: str) -> bool:
+    """Comic lettering: in capitals. Print on a page (a web address, a
+    copyright, readers' letters) is not."""
+    letters_ = [c for c in text if c.isalpha()]
+    return len(letters_) >= LETTERED_MIN and sum(c.isupper() for c in letters_) >= LETTERED_SHARE * len(letters_)
+
+
+def _flat_around(line: TextLine, region: np.ndarray, lines: list[TextLine]) -> bool:
+    """Whether `region` holds nearly all of a ring half a line height wide
+    around the line, text lines left out: the line is on it with no art
+    nearby."""
+    x0, y0, x1, y1 = line.box
+    reach = int(line.letter_height / 2)
+    ring = np.zeros_like(region)
+    ring[max(0, y0 - reach) : y1 + reach, max(0, x0 - reach) : x1 + reach] = True
+    for other in lines:
+        ox0, oy0, ox1, oy1 = other.box
+        ring[max(0, oy0) : oy1, max(0, ox0) : ox1] = False
+    return bool(ring.any()) and np.count_nonzero(region & ring) >= FLAT_AROUND * np.count_nonzero(ring)
 
 
 def _holds(box: tuple[int, int, int, int], inner: tuple[int, int, int, int]) -> bool:

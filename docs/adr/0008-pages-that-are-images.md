@@ -311,3 +311,41 @@ The user reported three defects on the first pages:
     fitted as any, and written turned back by the same angle.
   - The capitals' height and the emphasis are measured on upright letters
     and are left out for slanted text.
+
+## Revision 2026-11-25: dark balloons, lettering on the page, lines the OCR missed
+
+The user reported more text left in English on the cover and page 2, and
+asked that each fix serve the class of the defect, not the case.
+
+- **Light letters on a dark balloon** (white on the cover's red question
+  mark):
+  - Balloons were found only as regions of light pixels. A dark balloon's
+    region is now flooded by its color. This is used when, on both sides of
+    a line, most seeds are of a middle tone: black seeds are outlines and
+    letters, and one side can be out of a light balloon that hugs its text
+    (page 9).
+  - Tight light letters cut a dark balloon into strips. Regions of one
+    color whose lines are one text are joined.
+  - Within such a balloon, an outline is what is darker than its color.
+  - Only lettering is read there: dark art holds page numbers and marks.
+- **Lettering on the page or a panel's background** ("FANTASY! THRILLS!",
+  the credits, captions in the margin):
+  - The background, larger than MAX_PAGE_SHARE, was always taken for art.
+    A line on it is now read when the background holds nearly all of a
+    ring half a line height around it, other lines left out of the ring.
+  - It must also be lettering: three letters or more, 80% of them
+    capitals. A web address, a watermark, a page number and readers'
+    letters are print, and are not read.
+- **Lines the OCR missed** ("OCTOPUS??", slanted more than the rest of its
+  balloon; "WITH HIM? HE DIDN'T ANSWER!"; "I'M HELPLESS!"):
+  - Their letters were neither translated nor erased whole.
+  - `images/missed.py` looks near each balloon's text, on its color, for a
+    row of three letters or more that no line of the page holds. A
+    slanted line's area is the OCR's quadrilateral, not its upright box.
+  - It reads that band again across the balloon's text, turned level at
+    the balloon's slant. Lines read before are left out, a letter
+    different or not.
+  - The line goes to the balloon whose text is nearest, in reading order
+    by the row found. It is erased where it was read, turned back onto
+    the page.
+  - On the comic: 5 lines recovered, all of them real.
