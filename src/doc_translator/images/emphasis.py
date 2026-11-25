@@ -41,7 +41,8 @@ class Word:
 
 def measure(image: np.ndarray, balloon: Balloon) -> list[list[Word]]:
     """The words of each of `balloon`'s lines."""
-    if not balloon.cap_height:
+    # Slant and stroke are measured on upright letters.
+    if not balloon.cap_height or balloon.angle:
         return [[] for _ in balloon.lines]
     measured = []
     for line in balloon.lines:

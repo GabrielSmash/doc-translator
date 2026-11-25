@@ -75,7 +75,12 @@ class Balloon:
 
     @property
     def line_height(self) -> float:
-        return float(np.median([line.box[3] - line.box[1] for line in self.lines]))
+        return float(np.median([line.letter_height for line in self.lines]))
+
+    @property
+    def angle(self) -> float:
+        """Its lines' slant, in degrees (0 for most balloons)."""
+        return float(np.median([line.angle for line in self.lines]))
 
     def room(self) -> tuple[float, float, float, float]:
         """Where a translation can be written: the inside of the balloon
@@ -257,6 +262,9 @@ def _balloon(image: np.ndarray, lines: list[TextLine], inside: np.ndarray) -> Ba
         # With its letters: a caption fills its box whatever its text.
         balloon.round = np.count_nonzero(balloon.mask) < RECTANGLE_FILL * (x1 - x0 + 1) * (y1 - y0 + 1)
     balloon.ink, balloon.cap_height = _lettering(image, balloon.lines, balloon.color)
+    if balloon.angle:
+        # Measured upright: slanted, its letters are taller in its lines' boxes.
+        balloon.cap_height = 0.0
     return balloon
 
 

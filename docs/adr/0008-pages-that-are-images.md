@@ -278,3 +278,36 @@ still drawn, with "JULHO" lettered small beside it.
 - On the comic, 8 of 265 texts are left this way, all of them logos,
   titles, stamps or OCR misreadings: "the", "AMAZING",
   "WWW.MARVEL.COM", "JULY", the question mark's blurb, "Man".
+
+## Revision 2026-11-25: possessives, prices and slanted text
+
+The user reported three defects on the first pages:
+
+- **"AMÉRICA'S MAIS EMOCIONANTE SUPER-HERÓI ... MUNDO'S":** the model gave
+  Portuguese words the English "'s".
+  - A check now rejects a translation with an "'s" word the source does
+    not have as it is (names copied whole, "McDONALD'S", stay). Such a
+    translation is retried.
+  - On the last try, the words are named with the other words that do
+    not exist. Since the 8b model kept the "'s" even when named, the
+    rewrite is also spelled out ("the world's greatest hero" as "the
+    greatest hero of the world").
+  - Now: "...SUPER-HERÓI DA AMÉRICA CAPTURADO PELO MAIS TEMIDO SUPER-VILÃO
+    DO MUNDO!".
+- **"MARVEL COMICS 12 GRUPO":** the cover's "12¢" was read "12t".
+  - The reading again of unsure lines kept "12" (0.97): a reading that
+    only drops characters is no longer taken.
+  - A one- or two-digit number with a letter read for the cents sign
+    ("12t") is written "12¢". The box translated is then unchanged and
+    stays as drawn.
+- **The arrows of page 2 left in English:** their text is slanted (-13
+  and 8 degrees).
+  - The lines' upright boxes are twice as tall as the letters. Taken for
+    a title by DISPLAY_HEIGHT, the text was left as drawn.
+  - The OCR gives each line as a quadrilateral. A line's angle and its
+    height across it are now kept.
+  - A balloon's line height is measured across its lines. A slanted
+    balloon's room is turned level around its text, the translation is
+    fitted as any, and written turned back by the same angle.
+  - The capitals' height and the emphasis are measured on upright letters
+    and are left out for slanted text.

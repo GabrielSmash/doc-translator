@@ -57,14 +57,20 @@ def write(
     heavy = [any(start < e and s < end for s, e in emphasized) for start, end in spans]
     fonts = [_font(EMPHASIS_FONT) if h else _font() for h in heavy]
     room = _room(balloon)
+    tx0, ty0, tx1, ty1 = balloon.text_box
+    pivot = ((tx0 + tx1) / 2, (ty0 + ty1) / 2)
+    # A slanted text (an arrow's, page 2): its room turned level around the
+    # text's middle, fitted as any, and written turned back.
+    if angle := balloon.angle:
+        turn = cv2.getRotationMatrix2D(pivot, angle, 1.0)
+        room = cv2.warpAffine(room.astype(np.uint8), turn, (room.shape[1], room.shape[0]), flags=cv2.INTER_NEAREST) > 0
     base = balloon.cap_height / CAP if balloon.cap_height else balloon.line_height * SIZE_PER_LINE
     blue, green, red = balloon.ink
-    tx0, ty0, tx1, ty1 = balloon.text_box
     # Where the original text was; failing that, the middle of the room: a
     # caption's text can sit near its top, closer than the margin allows
     # ("MINUTES LATER...", page 6).
     ys, xs = np.nonzero(room)
-    centers = [((tx0 + tx1) / 2, (ty0 + ty1) / 2), ((tx0 + tx1) / 2, (ys.min() + ys.max()) / 2)]
+    centers = [pivot, (pivot[0], (ys.min() + ys.max()) / 2)]
 
     def widths(size: float) -> list[float]:
         return [
@@ -82,6 +88,8 @@ def write(
     space = _font().text_length(" ", fontsize=size)
     sizes = widths(size)
     color = (red / 255, green / 255, blue / 255)
+    # PyMuPDF turns text counterclockwise for a positive angle.
+    morph = (pymupdf.Point(pivot[0] * scale, pivot[1] * scale), pymupdf.Matrix(-angle)) if angle else None
     for first, last, x, baseline in lines:
         for index in range(first, last):
             page.insert_text(
@@ -93,6 +101,7 @@ def write(
                 fill=color,
                 render_mode=2 if heavy[index] else 0,
                 border_width=EMPHASIS_OUTLINE if heavy[index] else 0,
+                morph=morph,
             )
             x += sizes[index] + space
     return step

@@ -562,6 +562,7 @@ def test_an_english_possessive_is_not_left_on_a_portuguese_word():
     result = llm.translate_units([Unit(source)])
     assert result[0].text == "O SUPER-HERÓI MAIS EMOCIONANTE DA AMÉRICA CAPTURADO PELO SUPER-VILÃO MAIS TEMIDO DO MUNDO!"
     assert "AMÉRICA'S, MUNDO'S" in llm.prompts[2][0]["content"]
+    assert "has no 's possessive" in llm.prompts[2][0]["content"]
 
 
 def test_a_decision_with_an_invented_word_is_dropped():

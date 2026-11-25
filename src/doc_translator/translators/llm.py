@@ -503,6 +503,11 @@ class LLMTranslator:
                 + ", ".join(invented)
                 + ". Use correctly spelled words."
             )
+            if any(POSSESSIVE.fullmatch(word) for word in invented):
+                prompt[0]["content"] += (
+                    f"\n- {self.languages.target} has no 's possessive: write \"the world's greatest hero\" "
+                    "as \"the greatest hero of the world\", in the target language."
+                )
         translation = _clean(self._chat(prompt, max_tokens=64 + len(text)), text)
         return self._match_case(text, translation)
 

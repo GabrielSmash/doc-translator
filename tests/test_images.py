@@ -434,6 +434,60 @@ def test_emphasized_words_are_found_and_lettered_in_bold_italic(tmp_path):
     assert heavy == [[False, True, False, False, False], [False, False]]
 
 
+def slanted_caption_page() -> bytes:
+    """A caption box turned 10 degrees, descending to the right, its text
+    turned with it (the arrows of page 2)."""
+    import math
+
+    drawn = pymupdf.open()
+    page = drawn.new_page(width=WIDTH, height=HEIGHT)
+    pivot = pymupdf.Point(600, 450)
+    turn = pymupdf.Matrix(-10)  # PyMuPDF turns counterclockwise for positive angles
+    corners = [pymupdf.Point(x, y) for x, y in ((380, 360), (820, 360), (820, 540), (380, 540))]
+    turned = [pivot + (c - pivot) * turn for c in corners]
+    page.draw_polyline([*turned, turned[0]], color=(0, 0, 0), fill=(0.55, 0.8, 0.95), width=4)
+    font = str(FONT_DIR / FONT)
+    for i, line in enumerate(("IN THIS EPIC TALE...", "SEE THE HUMAN TORCH!")):
+        width = pymupdf.Font(fontfile=font).text_length(line, fontsize=30)
+        page.insert_text((600 - width / 2, 440 + 40 * i), line, fontsize=30, fontfile=font, fontname="c", morph=(pivot, turn))
+    picture = page.get_pixmap(dpi=72)
+    doc = pymupdf.open()
+    doc.new_page(width=WIDTH, height=HEIGHT).insert_image(pymupdf.Rect(0, 0, WIDTH, HEIGHT), stream=picture.tobytes("jpeg"))
+    assert math.isclose(turn.b, math.sin(math.radians(-10)), abs_tol=1e-6)
+    return doc.tobytes()
+
+
+def test_a_slanted_text_is_lettered_slanted(tmp_path):
+    """Its lines' boxes are taller than its letters: taken for a title, it
+    was left in English (page 2). Measured across its lines, it is a
+    caption, and its translation is written at its slant."""
+    import math
+
+    from doc_translator.pipeline import translate_pdf
+
+    doc = pymupdf.open("pdf", slanted_caption_page())
+    data = doc.extract_image(doc[0].get_image_info(xrefs=True)[0]["xref"])["image"]
+    image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    [caption] = balloons.find(image, ocr.read(image))
+    assert 8 <= caption.angle <= 12
+    assert caption.line_height < 45 < caption.lines[0].box[3] - caption.lines[0].box[1]
+
+    class Short:
+        cache_id = "short"
+
+        def translate_units(self, units):
+            return [UnitTranslation("NESTA HISTÓRIA ÉPICA... VEJA O TOCHA HUMANA!", []) for _ in units]
+
+    source = tmp_path / "comic.pdf"
+    source.write_bytes(slanted_caption_page())
+    assert translate_pdf(source, tmp_path / "out.pdf", Short()).images.balloons == 1
+    lines = [line for block in pymupdf.open(tmp_path / "out.pdf")[0].get_text("dict")["blocks"] for line in block.get("lines", [])]
+    assert lines
+    for line in lines:  # descending to the right, as the original
+        dx, dy = line["dir"]
+        assert 8 <= math.degrees(math.atan2(dy, dx)) <= 12
+
+
 def test_a_text_the_translation_leaves_as_it_is_keeps_its_letters(tmp_path):
     """A number, a name, a web address: erased and lettered again the same,
     it would only lose the original lettering."""
