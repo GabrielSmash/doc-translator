@@ -456,6 +456,8 @@ class LLMTranslator:
                 # And words that do not exist ("reinsertado"): named, the model
                 # writes a real one.
                 invented = self._spelling.unknown(text, translation, self._known.source_words) if self._spelling and self._known else []
+                # An English "'s" on a Portuguese word ("AMÉRICA'S") is one too.
+                invented += english_possessives(text, translation)
                 abbreviations = lost_abbreviations(text, translation, self._known)
                 if (missing := missing_tokens(text, translation) + abbreviations + names) or invented:
                     last = self._translate_one(text, previous, glossary, missing, invented)
@@ -739,6 +741,18 @@ def _severity(
     return _check(source, translation, glossary, known, words)[0]
 
 
+# A word with the English possessive ("AMERICA'S"): Portuguese has none.
+POSSESSIVE = re.compile(r"[^\W\d_][\w-]*['’][sS]\b")
+
+
+def english_possessives(source: str, translation: str) -> list[str]:
+    """Words of the translation with an English "'s" that the source does
+    not have as they are: a translated word given the source's ending
+    ("AMÉRICA'S", "MUNDO'S" for "AMERICA'S", "WORLD'S")."""
+    kept = {m.group(0).lower() for m in POSSESSIVE.finditer(source)}
+    return [m.group(0) for m in POSSESSIVE.finditer(translation) if m.group(0).lower() not in kept]
+
+
 # A text with this many ordinary words (lowercase, 3+ letters) whose words
 # mostly come back unchanged was not translated, in whole or in part.
 UNTRANSLATED_WORDS = 6
@@ -776,6 +790,8 @@ def _check(
         return 3, "left untranslated: " + ", ".join(words)
     if word := leading_source_word(source, translation, kept):
         return 3, f"first word left untranslated: {word}"
+    if possessives := english_possessives(source, translation):
+        return 3, "English possessive left: " + ", ".join(possessives)
     # Small models sometimes alter numbers ("RS-232" -> "RS-230") or signs
     # ("100Ω" -> "100<tool_call>"): in a technical document that is worse
     # than an awkward sentence.

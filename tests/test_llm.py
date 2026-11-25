@@ -548,6 +548,22 @@ def test_a_word_still_invented_is_named_in_the_last_try():
     assert "do not exist in Brazilian Portuguese: reinsertado" in llm.prompts[2][0]["content"]
 
 
+def test_an_english_possessive_is_not_left_on_a_portuguese_word():
+    """"AMERICA'S MOST EXCITING SUPER-HERO" came back "AMÉRICA'S MAIS
+    EMOCIONANTE SUPER-HERÓI" (the comic's cover): retried, then named."""
+    source = "AMERICA'S MOST EXCITING SUPER-HERO CAPTURED BY THE WORLD'S MOST DREADED SUPER-VILLAIN!"
+    llm = FakeLLM(
+        [
+            json.dumps({"translations": ["AMÉRICA'S MAIS EMOCIONANTE SUPER-HERÓI CAPTURADO PELO MUNDO'S MAIS TEMIDO SUPER-VILÃO!"]}),
+            "AMÉRICA'S MAIS EMOCIONANTE SUPER-HERÓI CAPTURADO PELO MUNDO'S MAIS TEMIDO SUPER-VILÃO!",
+            "O SUPER-HERÓI MAIS EMOCIONANTE DA AMÉRICA CAPTURADO PELO SUPER-VILÃO MAIS TEMIDO DO MUNDO!",
+        ]
+    )
+    result = llm.translate_units([Unit(source)])
+    assert result[0].text == "O SUPER-HERÓI MAIS EMOCIONANTE DA AMÉRICA CAPTURADO PELO SUPER-VILÃO MAIS TEMIDO DO MUNDO!"
+    assert "AMÉRICA'S, MUNDO'S" in llm.prompts[2][0]["content"]
+
+
 def test_a_decision_with_an_invented_word_is_dropped():
     from doc_translator.spelling import Spelling
 

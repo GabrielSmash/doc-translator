@@ -46,6 +46,14 @@ def _again(image: np.ndarray, line: TextLine) -> TextLine:
     result, _ = _engine()(crop, use_det=False, use_cls=False)
     if result:
         text, score = result[0][0], float(result[0][1])
-        if score > line.score and score >= RETRY_SCORE and text.strip():
+        # A reading that only drops characters tells nothing new and loses
+        # what it drops ("12t", the cover's "12¢", read again "12").
+        if score > line.score and score >= RETRY_SCORE and text.strip() and not _drops(line.text, text):
             return TextLine(line.box, text, score)
     return line
+
+
+def _drops(old: str, new: str) -> bool:
+    """`new` is `old` with characters left out."""
+    rest = iter(old)
+    return len(new) < len(old) and all(c in rest for c in new)

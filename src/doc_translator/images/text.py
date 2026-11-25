@@ -51,8 +51,12 @@ def respace(text: str, languages: LanguagePair = EN_PT_BR) -> str:
         return " ".join(_split(match.group(0), dictionary, common, hyphen))
 
     text = re.sub(r"[A-Za-z0-9']*[A-Za-z][A-Za-z0-9']*", lambda m: _digits_as_letters(m.group(0), dictionary, ranks), text)
+    text = CENTS.sub(r"\1¢", text)
     return re.sub(rf"[A-Za-z']{{{MIN_RUN},}}", split, text)
 
+
+# A price in cents, its sign read as a letter ("12t" for the cover's "12¢").
+CENTS = re.compile(r"\b(\d{1,2})[tTcC]\b")
 
 # Digits the OCR reads for letters of hand lettering ("I5THAT", "151T").
 LETTER_LIKE = str.maketrans({"0": "O", "1": "I", "5": "S", "8": "B"})

@@ -185,7 +185,8 @@ def test_digits_read_for_letters_are_letters_again():
     assert respace("OUR AGREEMENT, J.J., I5THATYOU'RE NEVER") == "OUR AGREEMENT, J.J., IS THAT YOU'RE NEVER"
     assert respace("WHAT YOU DON'T 151T?") == "WHAT YOU DON'T IS IT?"
     assert respace("ROOM 1201, IN 1963") == "ROOM 1201, IN 1963"  # numbers stay
-    assert respace("MARVEL COMICS 12T GROUP") == "MARVEL COMICS 12T GROUP"  # no words in "IZT"
+    # The price: a cents sign the OCR read as a letter (the cover's "12¢").
+    assert respace("MARVEL COMICS 12t GROUP") == "MARVEL COMICS 12¢ GROUP"
 
 
 def test_a_line_read_unsure_is_read_again_with_room_around_it(monkeypatch):
@@ -208,6 +209,15 @@ def test_a_line_read_unsure_is_read_again_with_room_around_it(monkeypatch):
 
     monkeypatch.setattr(ocr_, "_engine", lambda: Unsure())
     assert [line.text for line in ocr_.read(np.full((60, 120, 3), 255, np.uint8))] == ["1201"]
+
+    class Shorter(Engine):
+        def __call__(self, image, use_det=None, use_cls=None):
+            if use_det is False:
+                return [["12", 0.97]], None  # sure, but only drops the price's sign
+            return [[[[10, 10], [90, 10], [90, 40], [10, 40]], "12t", 0.75]], None
+
+    monkeypatch.setattr(ocr_, "_engine", lambda: Shorter())
+    assert [line.text for line in ocr_.read(np.full((60, 120, 3), 255, np.uint8))] == ["12t"]
 
 
 def test_lines_with_an_outline_between_them_are_two_texts():
