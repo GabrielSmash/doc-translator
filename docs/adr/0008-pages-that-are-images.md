@@ -217,9 +217,18 @@ Causes and decisions:
   than the lettering margin allows. Centered there, the translation was
   lettered small. Failing that center, the middle of the room is tried.
 - **Erasing open balloons:** an open balloon's lines were erased box by
-  box. The boxes cross the outline where the text runs close to it. They
-  are now painted only within the balloon's region near its text, and
-  reach a letter height sideways to catch letters the OCR left out ("I").
+  box, and the boxes cross the outline where the text runs close to it.
+  - A first fix painted the boxes only within the balloon's region, a
+    letter height wider sideways to catch letters the OCR left out ("I").
+  - The user then saw two new defects: corners painted over the panel's
+    light green, and the top of a character's hair cut off under a
+    balloon. The region of an open balloon runs into the panel: light art
+    (a light background, a face) is part of it, and dark art (hair) is a
+    hole in it.
+  - An open balloon's letters are now painted one by one: shapes of ink
+    at least half in its lines' boxes, plus the marks near the text as
+    small as a letter. A shape running out of the boxes (hair) is art, and
+    stays.
 - **Marks left out of lines:** in a closed balloon, ink near the text is
   erased too when it is as small as a letter (the dots of "LATER...").
   - A first version erased all ink within a line height of the text. It

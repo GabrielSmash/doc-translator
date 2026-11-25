@@ -131,12 +131,19 @@ def test_an_open_balloon_is_erased_within_its_outline():
     lines[0] = TextLine((x0, y0, 720, y1), lines[0].text, lines[0].score)
     [balloon] = balloons.find(image, lines)
     assert balloon.open
-    sx0, sy0, _, sy1 = lines[1].box  # "PORTA!", away from the outline
+    sx0, sy0, sx1, sy1 = lines[1].box  # "PORTA!", away from the outline
     cv2.putText(image, "I", (sx0 - 25, sy1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 3)
+    # Hair reaching into the last line's box from under it (page 6).
+    cv2.rectangle(image, (sx1 - 20, sy1 - 6), (sx1 + 40, sy1 + 60), (40, 40, 40), -1)
     before = image.copy()
     clean.erase(image, [balloon])
     changed = (before != image).any(axis=2)
     assert not (changed & (balloon.room_mask == 0)).any()
+    # The panel's light color around the balloon is part of its region, and
+    # stays (no corners painted over it).
+    panel = (np.abs(before.astype(int) - before[180, 280].astype(int)).sum(axis=2) < 30)
+    assert not (changed & panel).any()
+    assert (image[sy1 - 6 : sy1 + 60, sx1 - 20 : sx1 + 40] == 40).all()  # the hair is whole
     assert cv2.cvtColor(image[sy0:sy1, sx0 - 30 : sx0 - 2], cv2.COLOR_BGR2GRAY).min() > 150
 
 
