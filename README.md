@@ -231,4 +231,6 @@ licensed LGPLv3 or MPL 2.0, and the English one is SCOWL's en_US (from the
 same repository), under SCOWL's permissive license. The list of English
 words by use, which puts back the spaces OCR drops in comics, is
 [wordninja](https://github.com/keredson/wordninja)'s, under the MIT
-license. All three are downloaded, not distributed with this package.
+license. The grammar checker used on comics is
+[LanguageTool](https://languagetool.org) 6.6, under the LGPL 2.1; it needs
+Java. All four are downloaded, not distributed with this package.

@@ -62,6 +62,8 @@ class LanguagePair:
     # whole words.
     source_profanity: tuple[str, ...] = ()
     target_profanity: tuple[str, ...] = ()
+    # LanguageTool for the target (language code, URL of its release, SHA-256).
+    grammar_checker: tuple[str, str, str] | tuple[()] = ()
 
     def localize_dates(self, source: str, translation: str) -> str:
         """`translation` with the source's month abbreviations, still written
@@ -107,6 +109,12 @@ Boot Loader => KEEP""",
         "nos", "nas", "para", "por", "com", "ao", "aos", "à", "às", "um", "uma",
     }),
     kept_abbreviations=frozenset({"N/A"}),
+    # LanguageTool 6.6, LGPL 2.1; pinned.
+    grammar_checker=(
+        "pt-BR",
+        "https://languagetool.org/download/LanguageTool-6.6.zip",
+        "53600506b399bb5ffe1e4c8dec794fd378212f14aaf38ccef9b6f89314d11631",
+    ),
     source_profanity=(r"shit\w*", r"fuck\w*", r"damn\w*", "hell", r"bitch\w*", r"bastards?", "ass", "crap", r"piss\w*"),
     target_profanity=(
         "bosta", "merda", "porra", r"caralh\w*", r"fod\w+", r"puta?s?", "cacete", "cu", r"desgraç\w*",

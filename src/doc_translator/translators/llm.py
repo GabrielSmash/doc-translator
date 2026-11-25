@@ -32,6 +32,7 @@ from ..terms import (
 )
 from .base import Glossary, Unit, UnitTranslation, has_words
 from .cache import glossary_id
+from .grammar import grammar
 from .checks import (
     NUMBER,
     Vocabulary,
@@ -197,6 +198,7 @@ class LLMTranslator:
         self._all_layers_on_gpu = True
         self._progress = None
         self._comic = False
+        self._grammar = None
         self._brief = ""
         self._names = ""
         self._kept_words: set[str] = set()
@@ -231,6 +233,8 @@ class LLMTranslator:
             cast = self._cast([u.text for u in units if u.kind == "balloon"])
             self._brief = "\n".join(part for part in (self._format(COMIC_STYLE), cast, self._brief) if part)
             self._comic = True
+            # Agreement the model gets wrong and cannot see (ADR 0008).
+            self._grammar = self._load_grammar()
             self._context_units, self._following_units = STORY_CONTEXT, STORY_FOLLOWING
         # The names the document itself shows to be names (its screens'
         # items, labels, quoted names), not a list asked of the model: asked,
@@ -263,6 +267,9 @@ class LLMTranslator:
             UnitTranslation(self._cache.get(u.text, u.text), [self._cache.get(s, s) for s in u.segments])
             for u in units
         ]
+
+    def _load_grammar(self):
+        return grammar(self.languages)
 
     def _load_spelling(self) -> Spelling | None:
         return spelling(self.languages)
@@ -551,8 +558,44 @@ class LLMTranslator:
                     )
                 if problems := _problems(text, translation, glossary, self._known, self._spelling):
                     log.warning("Check translation of %r (%s): %r", text[:50], problems, translation[:80])
+            if self._grammar is not None and translation:
+                previous = (context + texts[:index])[-self._context_units :]
+                translation = self._grammatical(text, translation, previous, glossary)
             results.append(translation or text)
         return results
+
+    def _grammatical(self, text: str, translation: str, previous: list[str], glossary: Glossary) -> str:
+        """`translation` without the grammar errors LanguageTool finds in it:
+        translated again with the errors named, then alone with a short
+        prompt, then with LanguageTool's own suggestions. Each is taken only
+        free of grammar errors and no worse by the other checks."""
+        if not (errors := self._grammar_errors(translation)):
+            return translation
+        rank = _rank(text, translation, glossary, self._known, self._spelling)
+        attempts = (
+            lambda: self._translate_one(text, previous, glossary, grammar=[e.describe() for e in errors]),
+            lambda: self._translate_plain(text, glossary),
+            lambda: self._grammar.corrected(translation),
+        )
+        for attempt in attempts:
+            candidate = attempt()
+            if (
+                candidate
+                and not self._grammar_errors(candidate)
+                and _rank(text, candidate, glossary, self._known, self._spelling) <= rank
+            ):
+                log.debug("Grammar: %r -> %r", translation, candidate)
+                return candidate
+        log.warning("Check translation of %r (grammar: %s): %r", text[:50], "; ".join(e.describe() for e in errors), translation[:80])
+        return translation
+
+    def _grammar_errors(self, text: str) -> list:
+        try:
+            return self._grammar.errors(text)
+        except OSError as error:
+            log.warning("Grammar checker unavailable (%s); translations not checked for grammar", error)
+            self._grammar = None
+            return []
 
     def _translate_plain(self, text: str, glossary: Glossary) -> str:
         """`text` translated alone, with a short prompt: its kind and the
@@ -575,6 +618,7 @@ class LLMTranslator:
         missing: list[str] | None = None,
         invented: list[str] | None = None,
         profane: list[str] | None = None,
+        grammar: list[str] | None = None,
     ) -> str:
         prompt = self._prompt(f"Translate this text:\n{self._asked(text)}", [text], context, glossary)
         if terms := glossary.relevant(text, self.languages.source):
@@ -606,6 +650,11 @@ class LLMTranslator:
                 "\n- A previous translation used profanity the original does not have: "
                 + ", ".join(profane)
                 + ". Keep the original's register."
+            )
+        if grammar:
+            prompt[0]["content"] += (
+                f"\n- A previous translation had these {self.languages.target} grammar errors; "
+                "write it without them: " + "; ".join(grammar)
             )
         translation = _clean(self._chat(prompt, max_tokens=64 + len(text)), text)
         return self._match_case(text, translation)
@@ -867,6 +916,42 @@ def english_possessives(source: str, translation: str) -> list[str]:
     return [m.group(0) for m in POSSESSIVE.finditer(translation) if m.group(0).lower() not in kept]
 
 
+def compound_parts_left(
+    source: str, translation: str, kept: re.Pattern | None = None, dictionary: Spelling | None = None
+) -> list[str]:
+    """Words of the translation that are a part of a hyphenated word of the
+    source and no word of the target language ("VILLAIN" of "SUPER-VILLAIN"
+    beside "SUPER-HERÓI"): the compound translated in part."""
+    if dictionary is None:
+        return []
+    names = kept.sub(" ", source) if kept else source
+    whole = {w.lower() for w in re.findall(r"(?<![\w-])[^\W\d_]+(?:['’][^\W\d_]+)?(?![\w-])", names)}
+    parts = {
+        part.lower()
+        for compound in re.findall(r"[^\W\d_]+(?:-[^\W\d_]+)+", names)
+        for part in compound.split("-")
+    }
+    words = re.findall(r"(?<![\w-])[^\W\d_]+(?![\w-])", translation)
+    return [w for w in words if w.lower() in parts and w.lower() not in whole and len(w) > 2 and not dictionary.has(w.lower())]
+
+
+def repeated_words(source: str, translation: str) -> list[str]:
+    """A word written twice in a row with only a space between, alone or as
+    the end of the next ("HERÓI SUPER-HERÓI", "O O"), when the source does
+    not repeat one."""
+    def repeats(text: str) -> list[str]:
+        # Only spaces between: "NÃO! NÃO!", "VAI, VAI!" repeat on purpose.
+        tokens = list(re.finditer(r"[^\W\d_]+(?:-[^\W\d_]+)*", text.lower()))
+        return [
+            a.group(0)
+            for a, b in zip(tokens, tokens[1:])
+            if not text[a.end() : b.start()].strip()
+            and (a.group(0) == b.group(0) or b.group(0).endswith("-" + a.group(0)) or a.group(0).endswith("-" + b.group(0)))
+        ]
+
+    return [] if repeats(source) else repeats(translation)
+
+
 def added_profanity(source: str, translation: str, languages: LanguagePair = EN_PT_BR) -> list[str]:
     """Profane words of the translation when the source has none: the
     register changed ("BIG DEAL!" -> "QUE BOSTA!")."""
@@ -917,6 +1002,10 @@ def _check(
         return 3, "English possessive left: " + ", ".join(possessives)
     if profanity := added_profanity(source, translation):
         return 3, "profanity the original does not have: " + ", ".join(profanity)
+    if parts := compound_parts_left(source, translation, kept, dictionary):
+        return 3, "part of a compound left untranslated: " + ", ".join(parts)
+    if repeated := repeated_words(source, translation):
+        return 3, "word repeated: " + ", ".join(repeated)
     # Small models sometimes alter numbers ("RS-232" -> "RS-230") or signs
     # ("100Ω" -> "100<tool_call>"): in a technical document that is worse
     # than an awkward sentence.

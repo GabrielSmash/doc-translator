@@ -410,3 +410,45 @@ the case.
 - **A mark left out** must be on a line's row and within a line height of
   its ends. A thought balloon's bubble at the height of a line of the
   balloon beside it was erased (page 14).
+
+## Revision 2026-11-25: grammar checked by LanguageTool
+
+The user chose LanguageTool to close the class of agreement errors the
+model makes and cannot see ("A SUPER-HERÓI", "SUA DESEJO", "MEUS BRAÇOS
+NÃO É", "MINHA COSTAS").
+
+- **The server:** LanguageTool 6.6 (LGPL 2.1, Java) is downloaded once,
+  ~250 MB, pinned and checked against its SHA-256 like the dictionaries.
+  It runs on this machine for the length of a run. Without Java, a
+  warning is logged and translations are not checked for grammar. No
+  Python package is added.
+- **Rules used:** grammar, syntax, confused words and semantics. Its
+  spelling, capitalization and style rules mistake the comic's names and
+  capitals for errors. Capitals are checked in sentence case, with the
+  same offsets.
+- **Measured** on the whole comic's translations: 4 matches in 451 texts,
+  all of them real errors.
+- **Rules of our own** (`translators/grammar_pt.xml`, installed as its
+  `grammar_custom.xml`):
+  - LanguageTool misses an article whose noun comes after an adjective:
+    "A MAIS INTERESSANTE SUPER-HERÓI", "A MELHOR SUPER-HERÓI", the
+    superlatives the model writes for the hero.
+  - The rules cover article (+ mais/menos) + adjective + a noun of the
+    other gender.
+  - Before "melhor", LanguageTool tags "a" otherwise, so "a" and "o" are
+    matched as words.
+  - Set phrases stay: "A LONGO PRAZO", "A TODO CUSTO", "VOU A PÉ".
+- **In the translation:** a balloon translation with grammar errors is
+  translated again with the errors named. If they remain, it is translated
+  alone with a short prompt. If they still remain, LanguageTool's own
+  suggestions are taken. Each candidate must be free of grammar errors and
+  no worse by the other checks.
+- **Two more checks**, found on the cover's garbled blurb ("O MAIS
+  FASCINANTE HERÓI SUPER-HERÓI… TEMIDO VILLAIN SUPER-HERÓI"), which passed
+  every check:
+  - a part of a hyphenated source word left untranslated ("VILLAIN" of
+    "SUPER-VILLAIN");
+  - a word repeated with only a space between ("HERÓI SUPER-HERÓI") when
+    the source repeats none.
+  Both are grave: retried, then translated alone. Neither matched
+  anything else in the whole comic.

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Rules of doc-translator for LanguageTool's Portuguese (ADR 0008), copied
+into its rules as grammar_custom.xml. LanguageTool's own agreement rules
+miss an article whose noun comes after an adjective: the superlatives the
+local model writes for a comic's hero ("A MAIS INTERESSANTE SUPER-HERÓI",
+"A MELHOR SUPER-HERÓI").
+Tags: FreeLing's (tagset_PT.txt): DI0FS0 "uma", NCMS000 a masculine
+singular noun, AQ0CS0 an adjective of either gender. "a" and "o" are
+matched as words: before "melhor" LanguageTool tags "a" otherwise.
+-->
+<rules lang="pt" xsi:noNamespaceSchemaLocation="../../../../../../../../../languagetool-core/src/main/resources/org/languagetool/rules/rules.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    <category id="DOC_TRANSLATOR" name="doc-translator" type="grammar">
+        <rulegroup id="DOC_TRANSLATOR_ARTICLE_ADJECTIVE_NOUN" name="Concordância: artigo + adjetivo + substantivo">
+            <rule>
+                <pattern>
+                    <marker>
+                        <token>a</token>
+                    </marker>
+                    <token regexp="yes" min="0">mais|menos</token>
+                    <or>
+                        <token postag="AQ.[CF]S.+|AQ.CN.+" postag_regexp="yes"><exception postag="NCFS.+" postag_regexp="yes"/></token>
+                        <token regexp="yes">melhor|pior|maior|menor</token>
+                    </or>
+                    <token postag="NCMS.+" postag_regexp="yes"><exception postag="NCFS.+|NCCS.+" postag_regexp="yes"/></token>
+                </pattern>
+                <message>Possível erro de concordância: artigo feminino com substantivo masculino.</message>
+                <suggestion>o</suggestion>
+                <example correction="o">Ele é <marker>a</marker> mais interessante super-herói da América.</example>
+                <example correction="o">Ele é <marker>a</marker> melhor super-herói do mundo.</example>
+                <example>Ela é a mais interessante heroína da América.</example>
+            </rule>
+            <rule>
+                <pattern>
+                    <marker>
+                        <token postag="DI0FS0">uma</token>
+                    </marker>
+                    <token regexp="yes" min="0">mais|menos</token>
+                    <or>
+                        <token postag="AQ.[CF]S.+|AQ.CN.+" postag_regexp="yes"><exception postag="NCFS.+" postag_regexp="yes"/></token>
+                        <token regexp="yes">melhor|pior|maior|menor</token>
+                    </or>
+                    <token postag="NCMS.+" postag_regexp="yes"><exception postag="NCFS.+|NCCS.+" postag_regexp="yes"/></token>
+                </pattern>
+                <message>Possível erro de concordância: artigo feminino com substantivo masculino.</message>
+                <suggestion>um</suggestion>
+                <example correction="um">Ele é <marker>uma</marker> grande herói.</example>
+                <example>Ela é uma grande heroína.</example>
+            </rule>
+            <rule>
+                <pattern>
+                    <marker>
+                        <token>o</token>
+                    </marker>
+                    <token regexp="yes" min="0">mais|menos</token>
+                    <or>
+                        <token postag="AQ.[CM]S.+|AQ.CN.+" postag_regexp="yes"><exception postag="NCMS.+" postag_regexp="yes"/></token>
+                        <token regexp="yes">melhor|pior|maior|menor</token>
+                    </or>
+                    <token postag="NCFS.+" postag_regexp="yes"><exception postag="NCMS.+|NCCS.+" postag_regexp="yes"/></token>
+                </pattern>
+                <message>Possível erro de concordância: artigo masculino com substantivo feminino.</message>
+                <suggestion>a</suggestion>
+                <example correction="a">Ela é <marker>o</marker> mais forte mulher.</example>
+                <example>Ele é o mais forte homem.</example>
+            </rule>
+            <rule>
+                <pattern>
+                    <marker>
+                        <token postag="DI0MS0">um</token>
+                    </marker>
+                    <token regexp="yes" min="0">mais|menos</token>
+                    <or>
+                        <token postag="AQ.[CM]S.+|AQ.CN.+" postag_regexp="yes"><exception postag="NCMS.+" postag_regexp="yes"/></token>
+                        <token regexp="yes">melhor|pior|maior|menor</token>
+                    </or>
+                    <token postag="NCFS.+" postag_regexp="yes"><exception postag="NCMS.+|NCCS.+" postag_regexp="yes"/></token>
+                </pattern>
+                <message>Possível erro de concordância: artigo masculino com substantivo feminino.</message>
+                <suggestion>uma</suggestion>
+                <example correction="uma">Ela é <marker>um</marker> grande mulher.</example>
+                <example>Ele é um grande homem.</example>
+            </rule>
+        </rulegroup>
+    </category>
+</rules>

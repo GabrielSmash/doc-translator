@@ -26,12 +26,14 @@ class FakeLLM(LLMTranslator):
         self._context_units = 3
         self._following_units = 0
         self._comic = False
+        self._grammar = None
         self._known = None
         self._spelling = None
         self.answers = iter(answers)
         self.prompts: list[list[dict]] = []
         self.brief = None  # None: skip the description call
         self.cast = False  # False: skip reading a comic's characters
+        self.grammar = None  # no LanguageTool in tests
         self.spelling = None  # no dictionary download in tests
 
     def _load_spelling(self):
@@ -42,6 +44,9 @@ class FakeLLM(LLMTranslator):
 
     def _describe(self, units):
         return super()._describe(units) if self.brief is not None else ""
+
+    def _load_grammar(self):
+        return self.grammar
 
     def _cast(self, texts):
         return super()._cast(texts) if self.cast else ""
@@ -581,6 +586,24 @@ def test_profanity_the_original_does_not_have_is_retried():
     assert "profanity the original does not have: BOSTA" in llm.prompts[2][0]["content"]
 
 
+def test_a_compound_translated_in_part_and_a_repeated_word_are_found():
+    """The cover's blurb came back "O MAIS FASCINANTE HERÓI SUPER-HERÓI…
+    TEMIDO VILLAIN SUPER-HERÓI" and passed every check."""
+    from doc_translator.spelling import Spelling
+    from doc_translator.translators.llm import compound_parts_left, repeated_words
+
+    words = Spelling(Words({"villain", "teen"}))
+    source = "THE MOST EXCITING SUPER-HERO CAPTURED BY THE MOST DREADED SUPER-VILLAIN!"
+    garbled = "O MAIS FASCINANTE HERÓI SUPER-HERÓI CAPTURADO PELO MAIS TEMIDO VILLAIN SUPER-HERÓI!"
+    right = "O SUPER-HERÓI MAIS EMOCIONANTE CAPTURADO PELO SUPER-VILÃO MAIS TEMIDO!"
+    assert compound_parts_left(source, garbled, None, words) == ["VILLAIN"]
+    assert repeated_words(source, garbled) == ["herói"]
+    assert compound_parts_left(source, right, None, words) == [] and repeated_words(source, right) == []
+    # Names and repetitions on purpose stay.
+    assert compound_parts_left("SPIDER-MAN IS HERE!", "SPIDER-MAN ESTÁ AQUI!", None, words) == []
+    assert repeated_words("GO!", "VAI, VAI!") == [] and repeated_words("NO! NO!", "NÃO! NÃO!") == []
+
+
 def test_a_translation_still_wrong_is_translated_alone_with_a_short_prompt():
     """Told of the possessive, the 8b model kept it in the long prompt; alone,
     with a short one, it did not. That is the last strategy before warning."""
@@ -683,6 +706,60 @@ def test_a_comic_is_read_whole_for_its_characters_first(monkeypatch):
     batch = llm.prompts[2][1]["content"]
     assert "words for each agree with their gender" in batch
     assert "- Aunt May: female; Peter's aunt" in batch and "- Spider-Man: male; the hero" in batch
+
+
+class FakeGrammar:
+    """LanguageTool, for the errors given: (wrong words, suggestion)."""
+
+    def __init__(self, errors):
+        self.wrong = errors
+
+    def errors(self, text):
+        from doc_translator.translators.grammar import GrammarError
+
+        found = []
+        for words, fix in self.wrong:
+            if (at := text.upper().find(words)) >= 0:
+                found.append(GrammarError(text[at : at + len(words)], "Possível erro de concordância.", [fix], at, len(words)))
+        return found
+
+    def corrected(self, text):
+        import re
+
+        for words, fix in self.wrong:
+            text = re.sub(re.escape(words), fix, text, flags=re.IGNORECASE)
+        return text
+
+
+def test_a_grammar_error_is_named_to_the_model():
+    """"A SUPER-HERÓI" for Spider-Man: LanguageTool finds it, the model is
+    told, and writes it right."""
+    llm = FakeLLM(
+        [
+            json.dumps({"translations": ["A super-herói mais emocionante!"]}),
+            "O super-herói mais emocionante!",
+        ]
+    )
+    llm.grammar = FakeGrammar([("A SUPER-HERÓI", "O super-herói")])
+    result = llm.translate_units([Unit("The most exciting super-hero!", kind="balloon")])
+    assert result[0].text == "O super-herói mais emocionante!"
+    assert "grammar errors" in llm.prompts[-1][0]["content"] and "'A super-herói'" in llm.prompts[-1][0]["content"]
+
+
+def test_a_grammar_error_the_model_keeps_is_corrected_by_the_checker():
+    """Told twice, the model keeps "SUA DESEJO": LanguageTool's own
+    suggestion is taken, being free of errors and no worse by the checks."""
+    wrong = "Sua desejo é frívolo!"
+    llm = FakeLLM([json.dumps({"translations": [wrong]}), wrong, wrong])
+    llm.grammar = FakeGrammar([("SUA DESEJO", "Seu desejo")])
+    result = llm.translate_units([Unit("His wish is frivolous!", kind="balloon")])
+    assert result[0].text == "Seu desejo é frívolo!"
+
+
+def test_documents_are_not_checked_for_grammar():
+    llm = FakeLLM([json.dumps({"translations": ["A super-herói."]})])
+    llm.grammar = FakeGrammar([("A SUPER-HERÓI", "O super-herói")])
+    assert llm.translate_units([Unit("The super-hero.")])[0].text == "A super-herói."
 
 
 def test_balloons_see_the_story_around_them():
