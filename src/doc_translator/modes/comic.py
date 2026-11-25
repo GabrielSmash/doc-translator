@@ -8,8 +8,9 @@ import cv2
 import numpy as np
 import pymupdf
 
+from ..align import locate
 from ..images import balloons as balloons_
-from ..images import clean, image_pages, ocr, typeset
+from ..images import clean, emphasis, image_pages, ocr, typeset
 from ..images.text import join, respace
 from ..result import Result
 from ..translators.base import Translator, Unit
@@ -25,6 +26,8 @@ class ComicResult:
     pages: list[int] = field(default_factory=list)  # 0-based
     balloons: int = 0
     shrunk: list[str] = field(default_factory=list)  # texts written below typeset.MIN_SCALE
+    emphasized: int = 0  # emphasized phrases of the original
+    emphasis_lost: list[str] = field(default_factory=list)  # ...not found in their translation
 
 
 def translate(doc: pymupdf.Document, translator: Translator, run: Result) -> None:
@@ -56,18 +59,24 @@ def translate_pages(doc: pymupdf.Document, pages: list[int], translator: Transla
         page_balloons[:] = [b for b in page_balloons if not (b.open and b.line_height > DISPLAY_HEIGHT * lettering)]
         log.info("Page %d: %d balloons", page.number + 1, len(page_balloons))
 
-    texts = [respace(join([line.text for line in b.lines])) for *_, page_balloons in found for b in page_balloons]
-    translations = iter(translator.translate_units([Unit(text, kind="balloon") for text in texts]))
-    sources = iter(texts)
+    measured = [[emphasis.measure(image, b) for b in page_balloons] for _, _, image, page_balloons in found]
+    plain = emphasis.plain_stroke([words for page_words in measured for words in page_words])
+    units = []
+    for (*_, page_balloons), page_words in zip(found, measured):
+        for balloon, words in zip(page_balloons, page_words):
+            text = respace(join([line.text for line in balloon.lines]))
+            units.append(Unit(text, segments=emphasis.phrases(balloon, words, text, plain), kind="balloon"))
+    translations = iter(translator.translate_units(units))
+    sources = iter(units)
     for page, info, image, page_balloons in found:
         # A text the translation leaves as it is (a number, a name, a web
         # address) keeps its original letters.
         written = [
-            (balloon, translation)
-            for balloon, source, translation in zip(page_balloons, sources, (next(translations).text for _ in page_balloons))
-            if _letters(translation) != _letters(source)
+            (balloon, unit, translation)
+            for balloon, unit, translation in zip(page_balloons, sources, (next(translations) for _ in page_balloons))
+            if _letters(translation.text) != _letters(unit.text)
         ]
-        clean.erase(image, [balloon for balloon, _ in written])
+        clean.erase(image, [balloon for balloon, *_ in written])
         ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
         if not ok:
             raise RuntimeError(f"could not encode page {page.number + 1}")
@@ -75,11 +84,16 @@ def translate_pages(doc: pymupdf.Document, pages: list[int], translator: Transla
         scale = pymupdf.Rect(info["bbox"]).width / image.shape[1]
         if written:
             typeset.prepare(page)
-        for balloon, translation in written:
-            shrink = typeset.write(page, balloon, translation, scale)
+        for balloon, unit, translation in written:
+            spans = locate(unit.segments, translation.segments, translation.text)
+            result.emphasized += len(spans)
+            result.emphasis_lost += [segment for segment, span in zip(unit.segments, spans) if span is None]
+            shrink = typeset.write(page, balloon, translation.text, scale, [span for span in spans if span])
             if shrink < typeset.MIN_SCALE:
-                result.shrunk.append(translation)
+                result.shrunk.append(translation.text)
             result.balloons += 1
+    for phrase in result.emphasis_lost:
+        log.debug("Emphasis not found in the translation: %s", phrase)
     return result
 
 

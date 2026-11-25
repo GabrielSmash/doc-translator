@@ -48,6 +48,8 @@ class Report:
     comic_pages: int = 0
     balloons: int = 0
     lettered_small: list[str] = field(default_factory=list)
+    emphasized: int = 0  # emphasized phrases of the original
+    emphasis_lost: list[str] = field(default_factory=list)  # not found in their translation
 
     @classmethod
     def from_result(cls, result, source: Path, output: Path) -> "Report":
@@ -93,6 +95,8 @@ class Report:
             comic_pages=len(result.images.pages) if result.images else 0,
             balloons=result.images.balloons if result.images else 0,
             lettered_small=list(result.images.shrunk) if result.images else [],
+            emphasized=result.images.emphasized if result.images else 0,
+            emphasis_lost=list(result.images.emphasis_lost) if result.images else [],
         )
 
     @property
@@ -107,6 +111,11 @@ class Report:
             lines = [f"{self.comic_pages} comic pages, {self.balloons} balloons lettered again, in {seconds:.0f} s"]
             if self.lettered_small:
                 lines.append(f"  Lettered small: {len(self.lettered_small)} balloons (the translation is longer)")
+            if self.emphasis_lost:
+                lines.append(
+                    f"  Emphasis lost: {len(self.emphasis_lost)} of {self.emphasized} emphasized phrases"
+                    " not found in their translation"
+                )
         else:
             lines = [
                 f"{len(self.pages)} pages, {paragraphs} paragraphs, "

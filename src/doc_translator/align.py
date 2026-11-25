@@ -78,16 +78,8 @@ def realign(
     translation: str, base: Style, segments: list[Run], segment_translations: list[str]
 ) -> list[Run]:
     """Split `translation` into runs, applying each segment's style where found."""
-    words = [(m.start(), m.end()) for m in WORD.finditer(translation)]
-    taken: list[tuple[int, int]] = []
-    placed: list[tuple[int, int, Style]] = []
-
-    for segment, segment_translation in zip(segments, segment_translations):
-        candidates = [segment.text.strip(), segment_translation.strip()]
-        span = _locate(translation, words, candidates, taken)
-        if span:
-            taken.append(span)
-            placed.append((*span, segment.style))
+    spans = locate([segment.text for segment in segments], segment_translations, translation)
+    placed = [(*span, segment.style) for span, segment in zip(spans, segments) if span]
 
     runs: list[Run] = []
     cursor = 0
@@ -99,6 +91,20 @@ def realign(
     if cursor < len(translation):
         runs.append(Run(translation[cursor:], base))
     return runs
+
+
+def locate(segments: list[str], segment_translations: list[str], translation: str) -> list[tuple[int, int] | None]:
+    """Where each segment (or its translation on its own) is in `translation`:
+    a span of it, or None. Spans do not overlap."""
+    words = [(m.start(), m.end()) for m in WORD.finditer(translation)]
+    taken: list[tuple[int, int]] = []
+    spans: list[tuple[int, int] | None] = []
+    for segment, segment_translation in zip(segments, segment_translations):
+        span = _locate(translation, words, [segment.strip(), segment_translation.strip()], taken)
+        if span:
+            taken.append(span)
+        spans.append(span)
+    return spans
 
 
 def _locate(

@@ -157,5 +157,33 @@ Decisions:
   each line, leaving out the ones touching the line's edges (an outline).
   The translation's capitals are as tall: a size of height / 0.68, which
   is Comic Neue's capital height, measured on its "H".
-- **Bold and italic per balloon:** not detected. Emphasis is per word,
-  and is a decision of its own.
+- **Bold and italic per balloon:** not detected. Emphasis is per word.
+
+### Emphasized words
+
+Measured word by word (3268 words), the emphasized ones form a group of
+their own:
+- stroke: 26–30% of the capitals' height, against 18–19% for plain words;
+- slant: 14–25 degrees to the right, against within 8 degrees.
+
+Words leaning with a plain stroke are mostly short words, whose slant
+cannot be measured well. Heavy upright words are display text.
+
+Decisions:
+
+- **Words:** the OCR gives lines and drops spaces. A line's words are its
+  runs of ink, split by blanks wider than 35% of the capitals' height.
+- **Emphasized:** a stroke at least 1.3 times the comic's plain stroke,
+  and a slant of 10 degrees or more.
+- **To the text:** the line text's letters are spread evenly over its
+  words' ink. They are matched to the joined and spaced text letter by
+  letter. A word is emphasized when most of its letters are.
+- **To the translation:** the emphasized phrases are the unit's
+  `segments`, the path bold and links take in a document. Each engine
+  translates them on their own. `align.locate` finds them in the
+  translation, and they are lettered in Comic Neue Bold Italic (SIL OFL
+  1.1, same family). A phrase not found is counted in the run summary
+  ("Emphasis lost").
+
+On the comic: 220 phrases in 251 texts. On pages 1 and 6, 19 of 20 were
+found in the translation.

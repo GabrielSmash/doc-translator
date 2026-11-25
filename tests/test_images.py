@@ -211,6 +211,66 @@ def test_the_translation_is_lettered_as_tall_and_in_the_color_of_the_original(tm
     assert colors[2] >> 16 > 150 and (colors[2] >> 8) & 0xFF < 80  # the caption: red
 
 
+def emphasis_page() -> bytes:
+    """A balloon with one emphasized word, heavier and slanted: "MY *ARMS*
+    DID IT!" """
+    from doc_translator.images.typeset import EMPHASIS_FONT
+
+    drawn = pymupdf.open()
+    page = drawn.new_page(width=WIDTH, height=HEIGHT)
+    page.draw_rect(page.rect, color=None, fill=(0.55, 0.75, 0.9))
+    page.draw_oval(pymupdf.Rect(40, 60, 660, 340), color=(0, 0, 0), fill=(1, 1, 1), width=5)
+    plain, heavy = str(FONT_DIR / FONT), str(FONT_DIR / EMPHASIS_FONT)
+    x = 175
+    for word, font in (("MY", plain), ("ARMS", heavy), ("DID IT!", plain)):
+        bold = font == heavy
+        page.insert_text(
+            (x, 180), word, fontsize=30, fontfile=font, fontname="h" if bold else "p",
+            render_mode=2 if bold else 0, border_width=0.06 if bold else 0,
+        )
+        x += pymupdf.Font(fontfile=font).text_length(word + " ", fontsize=30) + 4
+    page.insert_text((165, 230), "THEY CAN DO IT ALL.", fontsize=30, fontfile=plain, fontname="p")
+    picture = page.get_pixmap(dpi=72)
+    doc = pymupdf.open()
+    doc.new_page(width=WIDTH, height=HEIGHT).insert_image(pymupdf.Rect(0, 0, WIDTH, HEIGHT), stream=picture.tobytes("jpeg"))
+    return doc.tobytes()
+
+
+def test_emphasized_words_are_found_and_lettered_in_bold_italic(tmp_path):
+    from doc_translator.images import emphasis
+    from doc_translator.pipeline import translate_pdf
+
+    doc = pymupdf.open("pdf", emphasis_page())
+    data = doc.extract_image(doc[0].get_image_info(xrefs=True)[0]["xref"])["image"]
+    image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    [balloon] = balloons.find(image, ocr.read(image))
+    words = emphasis.measure(image, balloon)
+    text = respace(join([line.text for line in balloon.lines]))
+    assert emphasis.phrases(balloon, words, text, emphasis.plain_stroke([words])) == ["ARMS"]
+
+    class Arms:
+        cache_id = "arms"
+
+        def translate_units(self, units):
+            self.units = units
+            return [UnitTranslation("MEUS BRAÇOS FIZERAM ISSO! ELES PODEM TUDO.", ["BRAÇOS"]) for _ in units]
+
+    source = tmp_path / "comic.pdf"
+    source.write_bytes(emphasis_page())
+    engine = Arms()
+    result = translate_pdf(source, tmp_path / "out.pdf", engine)
+    assert engine.units[0].segments == ["ARMS"]
+    assert result.images.emphasized == 1 and not result.images.emphasis_lost
+    fonts = {
+        span["text"]: span["font"]
+        for block in pymupdf.open(tmp_path / "out.pdf")[0].get_text("dict")["blocks"]
+        for line in block.get("lines", [])
+        for span in line["spans"]
+    }
+    assert "Italic" in fonts["BRAÇOS"]
+    assert all("Italic" not in font for text, font in fonts.items() if text != "BRAÇOS")
+
+
 def test_a_text_the_translation_leaves_as_it_is_keeps_its_letters(tmp_path):
     """A number, a name, a web address: erased and lettered again the same,
     it would only lose the original lettering."""

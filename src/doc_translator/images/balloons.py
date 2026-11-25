@@ -244,6 +244,15 @@ def _balloon(image: np.ndarray, lines: list[TextLine], inside: np.ndarray) -> Ba
     return balloon
 
 
+def letters(crop: np.ndarray, background: tuple[int, int, int]) -> np.ndarray:
+    """The letters of `crop` (1, the rest 0): the pixels far from the
+    balloon's color, split from it by Otsu's threshold."""
+    distance = np.linalg.norm(crop.astype(np.float32) - np.array(background, np.float32), axis=2)
+    scaled = np.clip(distance, 0, 255).astype(np.uint8)
+    threshold, _ = cv2.threshold(scaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return (scaled > max(threshold, INK_DISTANCE)).astype(np.uint8)
+
+
 def _lettering(
     image: np.ndarray, lines: list[TextLine], background: tuple[int, int, int]
 ) -> tuple[tuple[int, int, int], float]:
@@ -257,12 +266,9 @@ def _lettering(
         crop = image[y0:y1, x0:x1]
         if crop.size == 0:
             continue
-        distance = np.linalg.norm(crop.astype(np.float32) - np.array(background, np.float32), axis=2)
-        scaled = np.clip(distance, 0, 255).astype(np.uint8)
-        threshold, _ = cv2.threshold(scaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        letters = (scaled > max(threshold, INK_DISTANCE)).astype(np.uint8)
-        cores.append(crop[cv2.erode(letters, np.ones((2, 2), np.uint8)) > 0])
-        count, _, stats, _ = cv2.connectedComponentsWithStats(letters, connectivity=8)
+        ink = letters(crop, background)
+        cores.append(crop[cv2.erode(ink, np.ones((2, 2), np.uint8)) > 0])
+        count, _, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
         box_height = y1 - y0
         for top, height in stats[1:count, [cv2.CC_STAT_TOP, cv2.CC_STAT_HEIGHT]]:
             if height >= MIN_CAP_SHARE * box_height and top > 0 and top + height < box_height:

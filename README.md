@@ -121,7 +121,9 @@ uv sync --extra gpu                     # the same, from the source
 Pages that are images (a comic book, a scanned page) are read by OCR and
 written again: balloons and captions are found, their letters painted
 over with the balloon's color, and the translation lettered inside them
-in Comic Neue. It needs the optional OCR support:
+in Comic Neue, as tall as the original letters and in their color.
+Words the original emphasizes (heavier, slanted) are lettered in bold
+italic. It needs the optional OCR support:
 
 ```bash
 uv tool install 'doc-translator[images]'   # RapidOCR and OpenCV (CPU)

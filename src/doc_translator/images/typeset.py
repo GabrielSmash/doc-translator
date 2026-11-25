@@ -1,7 +1,8 @@
 """A translation lettered in its balloon: comic font, capitals, centered,
 each line as wide as the balloon is at its height, as large as the
-original letters where it fits."""
+original letters where it fits; emphasized words in bold italic."""
 
+import re
 from functools import cache
 from importlib.resources import files
 
@@ -14,6 +15,8 @@ from .balloons import Balloon
 FONT_DIR = files("doc_translator.images") / "fonts"
 FONT = "ComicNeue-Bold.ttf"
 FONT_NAME = "comicneue"
+EMPHASIS_FONT = "ComicNeue-BoldItalic.ttf"
+EMPHASIS_FONT_NAME = "comicneuebi"
 # Font size for an OCR line box this tall, when the capitals could not be
 # measured: the box holds the capitals and some room (they are 61% of it in
 # the comic).
@@ -31,40 +34,59 @@ CAP = 0.68
 
 
 @cache
-def _font() -> pymupdf.Font:
-    return pymupdf.Font(fontfile=str(FONT_DIR / FONT))
+def _font(name: str = FONT) -> pymupdf.Font:
+    return pymupdf.Font(fontfile=str(FONT_DIR / name))
 
 
-def write(page: pymupdf.Page, balloon: Balloon, text: str, scale: float) -> float:
+def write(
+    page: pymupdf.Page, balloon: Balloon, text: str, scale: float, emphasized: list[tuple[int, int]] = ()
+) -> float:
     """Letter `text` (in capitals) in `balloon` on `page` (`prepare`d); `scale`: page
-    units per image pixel. Returns the size used, as a share of the
-    original's (below MIN_SCALE when even the smallest did not fit). The
-original is the size whose capitals are as tall as the balloon's, in their
-color."""
-    words = text.upper().split()
-    if not words:
+    units per image pixel; `emphasized`: spans of `text` lettered in bold
+    italic. Returns the size used, as a share of the original's (below
+    MIN_SCALE when even the smallest did not fit). The original is the size
+    whose capitals are as tall as the balloon's, in their color."""
+    spans = [(m.start(), m.end()) for m in re.finditer(r"\S+", text)]
+    if not spans:
         return 1.0
+    words = [text[start:end].upper() for start, end in spans]
+    heavy = [any(start < e and s < end for s, e in emphasized) for start, end in spans]
+    fonts = [_font(EMPHASIS_FONT) if h else _font() for h in heavy]
     room = _room(balloon)
     base = balloon.cap_height / CAP if balloon.cap_height else balloon.line_height * SIZE_PER_LINE
     blue, green, red = balloon.ink
     tx0, ty0, tx1, ty1 = balloon.text_box
     center = ((tx0 + tx1) / 2, (ty0 + ty1) / 2)
+
+    def widths(size: float) -> list[float]:
+        return [font.text_length(word, fontsize=size) for font, word in zip(fonts, words)]
+
     for step in STEPS:
-        if lines := _fit(words, room, base * step, center):
+        if lines := _fit(widths(base * step), room, base * step, center):
             break
     else:
-        step, lines = STEPS[-1] * 0.8, _fit(words, room, base * STEPS[-1] * 0.8, center, force=True)
+        step = STEPS[-1] * 0.8
+        lines = _fit(widths(base * step), room, base * step, center, force=True)
     size = base * step
-    for text_line, x, baseline in lines:
-        page.insert_text(
-            (x * scale, baseline * scale), text_line, fontname=FONT_NAME, fontsize=size * scale, color=(red / 255, green / 255, blue / 255)
-        )
+    space = _font().text_length(" ", fontsize=size)
+    sizes = widths(size)
+    for first, last, x, baseline in lines:
+        for index in range(first, last):
+            page.insert_text(
+                (x * scale, baseline * scale),
+                words[index],
+                fontname=EMPHASIS_FONT_NAME if heavy[index] else FONT_NAME,
+                fontsize=size * scale,
+                color=(red / 255, green / 255, blue / 255),
+            )
+            x += sizes[index] + space
     return step
 
 
 def prepare(page: pymupdf.Page) -> None:
-    """Put the lettering font in `page`, once, before `write`."""
+    """Put the lettering fonts in `page`, once, before `write`."""
     page.insert_font(fontname=FONT_NAME, fontbuffer=_font().buffer)
+    page.insert_font(fontname=EMPHASIS_FONT_NAME, fontbuffer=_font(EMPHASIS_FONT).buffer)
 
 
 def _room(balloon: Balloon) -> np.ndarray:
@@ -82,18 +104,17 @@ def _room(balloon: Balloon) -> np.ndarray:
 
 
 def _fit(
-    words: list[str], room: np.ndarray, size: float, center: tuple[float, float], force: bool = False
-) -> list[tuple[str, float, float]] | None:
-    """Lines (text, left x, baseline) of `words` at `size`, centered on
-    `center`, each within the room at its height; None if they do not fit."""
+    widths: list[float], room: np.ndarray, size: float, center: tuple[float, float], force: bool = False
+) -> list[tuple[int, int, float, float]] | None:
+    """Lines (first word, end word, left x, baseline) of words this wide at
+    `size`, centered on `center`, each within the room at its height; None
+    if they do not fit."""
     margin = max(1, int(MARGIN * size))
     inside = cv2.erode(room.astype(np.uint8), np.ones((2 * margin + 1, 2 * margin + 1), np.uint8)) > 0
-    font = _font()
-    space = font.text_length(" ", fontsize=size)
-    widths = [font.text_length(w, fontsize=size) for w in words]
+    space = _font().text_length(" ", fontsize=size)
     line_height = size * LEADING
     cx, cy = center
-    for count in range(1, len(words) + 1):
+    for count in range(1, len(widths) + 1):
         top = cy - count * line_height / 2
         spans = [_span(inside, top + i * line_height, top + (i + 1) * line_height, cx) for i in range(count)]
         if not force and any(span is None for span in spans):
@@ -103,22 +124,21 @@ def _fit(
         lines, index = [], 0
         for i, span in enumerate(spans):
             left, right = span if span else (cx - size * 4, cx + size * 4)
-            taken, width = [], 0.0
-            while index < len(words):
-                extra = widths[index] + (space if taken else 0)
-                if width + extra > right - left and (taken or not force):
+            first, width = index, 0.0
+            while index < len(widths):
+                extra = widths[index] + (space if index > first else 0)
+                if width + extra > right - left and (index > first or not force):
                     break
-                taken.append(words[index])
                 width += extra
                 index += 1
-            if not taken:
+            if index == first:
                 break
             mid = (left + right) / 2
             baseline = top + i * line_height + (line_height + CAP * size) / 2
-            lines.append((" ".join(taken), mid - width / 2, baseline))
-        if index == len(words) and len(lines) == count:
+            lines.append((first, index, mid - width / 2, baseline))
+        if index == len(widths) and len(lines) == count:
             return lines
-        if force and count == len(words):
+        if force and count == len(widths):
             return lines
     return None
 
