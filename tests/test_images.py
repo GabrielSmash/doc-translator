@@ -269,6 +269,15 @@ def test_emphasized_words_are_found_and_lettered_in_bold_italic(tmp_path):
     }
     assert "Italic" in fonts["BRAÇOS"]
     assert all("Italic" not in font for text, font in fonts.items() if text != "BRAÇOS")
+    # Lettered heavy and slanted as the original: measured again, it is the
+    # one emphasized word ("MEUS BRAÇOS FIZERAM ISSO! ELES" / "PODEM TUDO.").
+    picture = pymupdf.open(tmp_path / "out.pdf")[0].get_pixmap(dpi=72)
+    lettered = cv2.imdecode(np.frombuffer(picture.tobytes("png"), np.uint8), cv2.IMREAD_COLOR)
+    [balloon] = balloons.find(lettered, ocr.read(lettered))
+    words = emphasis.measure(lettered, balloon)
+    plain = emphasis.plain_stroke([words])
+    heavy = [[w.stroke >= emphasis.HEAVY * plain and w.slant >= emphasis.SLANT for w in line] for line in words]
+    assert heavy == [[False, True, False, False, False], [False, False]]
 
 
 def test_a_text_the_translation_leaves_as_it_is_keeps_its_letters(tmp_path):

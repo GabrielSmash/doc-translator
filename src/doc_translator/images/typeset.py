@@ -17,6 +17,10 @@ FONT = "ComicNeue-Bold.ttf"
 FONT_NAME = "comicneue"
 EMPHASIS_FONT = "ComicNeue-BoldItalic.ttf"
 EMPHASIS_FONT_NAME = "comicneuebi"
+# Comic Neue Bold Italic is as heavy as Bold; emphasis is heavier in comics
+# (a stroke 1.5 times the plain one): outlined in its color this much, in
+# font sizes, its stroke goes from 0.10 to 0.15 of the size.
+EMPHASIS_OUTLINE = 0.05
 # Font size for an OCR line box this tall, when the capitals could not be
 # measured: the box holds the capitals and some room (they are 61% of it in
 # the comic).
@@ -59,7 +63,10 @@ def write(
     center = ((tx0 + tx1) / 2, (ty0 + ty1) / 2)
 
     def widths(size: float) -> list[float]:
-        return [font.text_length(word, fontsize=size) for font, word in zip(fonts, words)]
+        return [
+            font.text_length(word, fontsize=size) + (EMPHASIS_OUTLINE * size if h else 0)
+            for font, word, h in zip(fonts, words, heavy)
+        ]
 
     for step in STEPS:
         if lines := _fit(widths(base * step), room, base * step, center):
@@ -70,6 +77,7 @@ def write(
     size = base * step
     space = _font().text_length(" ", fontsize=size)
     sizes = widths(size)
+    color = (red / 255, green / 255, blue / 255)
     for first, last, x, baseline in lines:
         for index in range(first, last):
             page.insert_text(
@@ -77,7 +85,10 @@ def write(
                 words[index],
                 fontname=EMPHASIS_FONT_NAME if heavy[index] else FONT_NAME,
                 fontsize=size * scale,
-                color=(red / 255, green / 255, blue / 255),
+                color=color,
+                fill=color,
+                render_mode=2 if heavy[index] else 0,
+                border_width=EMPHASIS_OUTLINE if heavy[index] else 0,
             )
             x += sizes[index] + space
     return step

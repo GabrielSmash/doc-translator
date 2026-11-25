@@ -1,10 +1,10 @@
 """Emphasized words of a balloon ("MY **ARMS** DID IT!"): lettered heavier
 and slanted, where the rest stands upright (ADR 0008).
 
-The OCR gives lines, not words, and drops spaces. Words are the runs of
-ink a blank wider than a letter's gap separates; each is measured, and the
-letters of the line text are spread over the ink of the line to tell
-which word each letter is in.
+The OCR gives lines, not words, and drops spaces. Words are the letters
+closer to each other, row by row, than a space: slanted letters leave no
+blank column between words. Each is measured, and the letters of the line
+text are spread over the words' ink to tell which word each letter is in.
 """
 
 import re
@@ -22,9 +22,10 @@ WORD_GAP = 0.35
 # Emphasized: a stroke this many times the comic's plain stroke, slanted
 # right by this many degrees or more. On the comic, plain words have a
 # stroke of 18-19% of their capitals and stand within 8 degrees; the
-# emphasized ones, 26-30% and 14-25 degrees.
+# emphasized ones, 26-30% and 14-25 degrees. Comic Neue Bold Italic, the
+# emphasis lettered in a translation, leans 9.
 HEAVY = 1.3
-SLANT = 10
+SLANT = 8
 # Slants tried, in degrees.
 SLANTS = range(-25, 26)
 WORD = re.compile(r"[^\s.,;:!?\"]+")
@@ -47,9 +48,10 @@ def measure(image: np.ndarray, balloon: Balloon) -> list[list[Word]]:
         x0, y0, x1, y1 = (max(0, v) for v in line.box)
         ink = letters(image[y0:y1, x0:x1], balloon.color)
         words = []
-        for start, end in _runs(ink, WORD_GAP * balloon.cap_height):
-            word = ink[:, start:end]
-            if np.count_nonzero(word) and end - start >= balloon.cap_height / 2:
+        for start, end, word in _words(ink, WORD_GAP * balloon.cap_height):
+            # Not a word: a sliver of the lines above and below, cut by the
+            # line's box, or a mark.
+            if end - start >= balloon.cap_height / 2 and np.ptp(np.flatnonzero(word.any(axis=1))) >= balloon.cap_height / 2:
                 words.append(Word(start, end, _stroke(word) / balloon.cap_height, _slant(word)))
         measured.append(words)
     return measured
@@ -106,19 +108,19 @@ def _letter_flags(text: str, words: list[Word], plain: float) -> list[bool]:
     return [bool(heavy[int(np.searchsorted(ends, c))]) for c in centers]
 
 
-def _runs(ink: np.ndarray, gap: float) -> list[tuple[int, int]]:
-    """Column ranges of ink a blank wider than `gap` separates."""
-    columns = np.flatnonzero(ink.any(axis=0))
-    if columns.size == 0:
-        return []
-    runs, start, last = [], int(columns[0]), int(columns[0])
-    for x in columns[1:]:
-        if x - last > gap:
-            runs.append((start, last + 1))
-            start = int(x)
-        last = int(x)
-    runs.append((start, last + 1))
-    return runs
+def _words(ink: np.ndarray, gap: float) -> list[tuple[int, int, np.ndarray]]:
+    """The words of a line's letters, left to right: (left, right, its ink).
+    Letters less than `gap` apart on some row are one word."""
+    width = 2 * int(gap / 2) + 1
+    joined = cv2.dilate(ink, np.ones((1, width), np.uint8))
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(joined, connectivity=8)
+    words = []
+    for label in sorted(range(1, count), key=lambda i: stats[i, cv2.CC_STAT_LEFT]):
+        own = (labels == label) & (ink > 0)
+        columns = np.flatnonzero(own.any(axis=0))
+        if columns.size:
+            words.append((int(columns[0]), int(columns[-1]) + 1, own.astype(np.uint8)))
+    return words
 
 
 def _stroke(ink: np.ndarray) -> float:

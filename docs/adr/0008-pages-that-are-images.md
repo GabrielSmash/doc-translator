@@ -171,10 +171,14 @@ cannot be measured well. Heavy upright words are display text.
 
 Decisions:
 
-- **Words:** the OCR gives lines and drops spaces. A line's words are its
-  runs of ink, split by blanks wider than 35% of the capitals' height.
+- **Words:** the OCR gives lines and drops spaces. A line's words are
+  its letters closer than 35% of the capitals' height to each other, row
+  by row. Blank columns are not used: slanted letters leave none between
+  words ("STRENGTH IS INCALCULABLE!" was one word). Shapes shorter than
+  half the capitals are slivers of the lines above and below, cut by the
+  line's box.
 - **Emphasized:** a stroke at least 1.3 times the comic's plain stroke,
-  and a slant of 10 degrees or more.
+  and a slant of 8 degrees or more (Comic Neue Bold Italic leans 9).
 - **To the text:** the line text's letters are spread evenly over its
   words' ink. They are matched to the joined and spaced text letter by
   letter. A word is emphasized when most of its letters are.
@@ -182,8 +186,13 @@ Decisions:
   `segments`, the path bold and links take in a document. Each engine
   translates them on their own. `align.locate` finds them in the
   translation, and they are lettered in Comic Neue Bold Italic (SIL OFL
-  1.1, same family). A phrase not found is counted in the run summary
+  1.1, same family). It is as heavy as the Bold, so it is outlined in its
+  own color by 5% of its size. Its stroke becomes 1.4 times the plain one,
+  as in the comic. Read again, the lettered translation's emphasis is found
+  by the same measure (a test). A phrase not found is counted in the run summary
   ("Emphasis lost").
 
-On the comic: 220 phrases in 251 texts. On pages 1 and 6, 19 of 20 were
-found in the translation.
+On the comic: 243 phrases in 251 texts. On page 6, the thought balloon
+"**I DID IT!!** MY **ARMS** DID IT! ... **INCALCULABLE!** ... **ANYTHING!!**"
+is found word for word, and 17 of the page's 18 phrases are found in the
+translation.
