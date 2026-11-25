@@ -20,8 +20,17 @@ OPEN_PAD = 4
 IN_LINES = 0.5
 
 
-def erase(image: np.ndarray, balloons: list[Balloon]) -> None:
-    """Paint, in place, the letters of each balloon with its color.
+# A balloon is erased only when its painting covers this share of the ink
+# in its lines' boxes. Less, its letters are not where they were taken to
+# be (on another color, joined to a frame): lettered again, the
+# translation would sit over the original (the cover's "JULY").
+MIN_COVERED = 0.8
+
+
+def erase(image: np.ndarray, balloons: list[Balloon]) -> list[bool]:
+    """Paint, in place, the letters of each balloon with its color; for
+    each balloon, whether it was erased (when it could not be, it is left
+    as it is: see MIN_COVERED).
 
     A closed balloon: its lines' boxes, within its outline, and the marks
     near its text the OCR left out of them.
@@ -32,6 +41,7 @@ def erase(image: np.ndarray, balloons: list[Balloon]) -> None:
     painted whole, cut the art they reach (page 6).
     """
     height, width = image.shape[:2]
+    erased = []
     for balloon in balloons:
         pad = OPEN_PAD if balloon.open else PAD
         boxes = np.zeros((height, width), np.uint8)
@@ -46,7 +56,28 @@ def erase(image: np.ndarray, balloons: list[Balloon]) -> None:
             paint = shapes | strays
             if balloon.room_mask is not None:
                 paint &= balloon.room_mask
+        if _covered(image, balloon, paint) < MIN_COVERED:
+            erased.append(False)
+            continue
         image[paint > 0] = balloon.color
+        erased.append(True)
+    return erased
+
+
+def _covered(image: np.ndarray, balloon: Balloon, paint: np.ndarray) -> float:
+    """The share of the ink in the middle of the balloon's lines' boxes that
+    `paint` covers. The ends of a box can cross the balloon's outline; its
+    letters are in between."""
+    ink = covered = 0
+    inset = int(balloon.line_height / 2)
+    for line in balloon.lines:
+        x0, y0, x1, y1 = (max(0, v) for v in line.box)
+        if x1 - x0 > 3 * inset:
+            x0, x1 = x0 + inset, x1 - inset
+        letters_ = letters(image[y0:y1, x0:x1], balloon.color) > 0
+        ink += int(letters_.sum())
+        covered += int((letters_ & (paint[y0:y1, x0:x1] > 0)).sum())
+    return covered / ink if ink else 1.0
 
 
 def _shapes(image: np.ndarray, balloon: Balloon, boxes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

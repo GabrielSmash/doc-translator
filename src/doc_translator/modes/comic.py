@@ -27,6 +27,7 @@ class ComicResult:
     balloons: int = 0
     shrunk: list[str] = field(default_factory=list)  # texts written below typeset.MIN_SCALE
     emphasized: int = 0  # emphasized phrases of the original
+    not_erased: list[str] = field(default_factory=list)  # texts left as drawn: their letters could not be erased
     emphasis_lost: list[str] = field(default_factory=list)  # ...not found in their translation
 
 
@@ -76,7 +77,10 @@ def translate_pages(doc: pymupdf.Document, pages: list[int], translator: Transla
             for balloon, unit, translation in zip(page_balloons, sources, (next(translations) for _ in page_balloons))
             if _letters(translation.text) != _letters(unit.text)
         ]
-        clean.erase(image, [balloon for balloon, *_ in written])
+        # A text whose letters could not be erased keeps them, untranslated.
+        erased = clean.erase(image, [balloon for balloon, *_ in written])
+        result.not_erased += [unit.text for (_, unit, _), done in zip(written, erased) if not done]
+        written = [item for item, done in zip(written, erased) if done]
         ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
         if not ok:
             raise RuntimeError(f"could not encode page {page.number + 1}")
@@ -94,6 +98,8 @@ def translate_pages(doc: pymupdf.Document, pages: list[int], translator: Transla
             result.balloons += 1
     for phrase in result.emphasis_lost:
         log.debug("Emphasis not found in the translation: %s", phrase)
+    for text in result.not_erased:
+        log.info("Left untranslated, its letters could not be erased: %s", text)
     return result
 
 

@@ -254,3 +254,27 @@ Causes and decisions:
     region of the right one started left of both.
   - Two captions on pages 15 and 18 are now read before the balloons
     under them.
+
+## Revision 2026-11-25: a text is lettered again only where it was erased
+
+The whole comic run after the page 6 fixes showed the cover's "JULY"
+still drawn, with "JULHO" lettered small beside it.
+
+- **Cause:** "JULY" is in a small white box over the sky, and its line went
+  to the sky's region. An open balloon's color was taken from its region:
+  the sky's blue. Against blue, the whole white box is "ink", one large
+  shape. Painted letter by letter, nothing of it was erased; painted box
+  by box, as before, the box was painted blue.
+- **Color:** an open balloon's color is now the most common one around
+  its text, in its region or not. On the comic this changes 3 of 105 open
+  texts: "JULY" (white), the cover's question mark (red), and an OCR
+  misreading.
+- **Erased before lettered:** a text is erased only when the painting
+  covers 80% of the ink in the middle of its lines' boxes (the ends can
+  cross the outline). Otherwise it is left as drawn, untranslated, and
+  counted in the run summary ("Left untranslated"). Lettering a
+  translation over letters that were not erased is the defect class; this
+  closes it whatever the cause.
+- On the comic, 8 of 265 texts are left this way, all of them logos,
+  titles, stamps or OCR misreadings: "the", "AMAZING",
+  "WWW.MARVEL.COM", "JULY", the question mark's blurb, "Man".

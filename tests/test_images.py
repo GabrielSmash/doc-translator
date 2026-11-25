@@ -128,7 +128,7 @@ def test_an_open_balloon_is_erased_within_its_outline():
     lines = ocr.read(image)
     # A box crossing the outline, as the OCR's do near it.
     x0, y0, x1, y1 = lines[0].box
-    lines[0] = TextLine((x0, y0, 720, y1), lines[0].text, lines[0].score)
+    lines[0] = TextLine((x0, y0, 700, y1), lines[0].text, lines[0].score)
     [balloon] = balloons.find(image, lines)
     assert balloon.open
     sx0, sy0, sx1, sy1 = lines[1].box  # "PORTA!", away from the outline
@@ -145,6 +145,20 @@ def test_an_open_balloon_is_erased_within_its_outline():
     assert not (changed & panel).any()
     assert (image[sy1 - 6 : sy1 + 60, sx1 - 20 : sx1 + 40] == 40).all()  # the hair is whole
     assert cv2.cvtColor(image[sy0:sy1, sx0 - 30 : sx0 - 2], cv2.COLOR_BGR2GRAY).min() > 150
+
+
+def test_a_text_that_cannot_be_erased_is_left_as_drawn():
+    """Its letters not where they were taken to be ("JULY" on the cover, in
+    a white box, taken to be on the sky's blue): erasing would miss most of
+    them and the translation would sit over the original. It is left as it
+    is, and not lettered again."""
+    image = open_balloon_page()
+    [balloon] = balloons.find(image, ocr.read(image))
+    assert balloon.open
+    balloon.color = (230, 190, 140)  # the panel's blue, not the balloon's white
+    before = image.copy()
+    assert clean.erase(image, [balloon]) == [False]
+    assert (image == before).all()
 
 
 def test_a_translation_goes_in_the_middle_of_its_room_where_the_text_was_too_high():

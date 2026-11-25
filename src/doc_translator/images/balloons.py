@@ -239,10 +239,13 @@ def _balloon(image: np.ndarray, lines: list[TextLine], inside: np.ndarray) -> Ba
         balloon.open = True
         balloon.box = balloon.text_box
         # The region runs into the panel: its most common color can be the
-        # panel's ("yellow" for a white balloon on a yellow panel).
+        # panel's ("yellow" for a white balloon on a yellow panel). The color
+        # is the one around the text, in the region or not: text in a small
+        # box the region surrounds is on the box's color ("JULY" on the
+        # cover, in white over the sky).
         near = np.zeros_like(inside)
         near[max(0, ty0 - 8) : ty1 + 8, max(0, tx0 - 8) : tx1 + 8] = True
-        balloon.color = _color(image, inside & near)
+        balloon.color = _color(image, near)
         # Near its text the balloon still has its outline: the room is the
         # region there, not the text's box (whose corners cross it).
         reach = int(balloon.line_height)
