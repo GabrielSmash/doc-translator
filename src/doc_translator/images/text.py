@@ -57,8 +57,10 @@ def respace(text: str, languages: LanguagePair = EN_PT_BR) -> str:
         lambda m: _as_letters(m.group(0), dictionary, ranks),
         text,
     )
-    text = CENTS.sub(r"\1¢", text)
-    return re.sub(rf"[A-Za-z']{{{MIN_RUN},}}", split, text)
+    text = re.sub(rf"[A-Za-z']{{{MIN_RUN},}}", split, text)
+    # After the spaces: a price can be joined to the next line's word
+    # ("12t" + "GROUP": "12tGROUP", the cover).
+    return CENTS.sub(r"\1¢", text)
 
 
 # A price in cents, its sign read as a letter ("12t" for the cover's "12¢").

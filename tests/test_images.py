@@ -150,6 +150,9 @@ def test_an_open_balloon_is_erased_within_its_outline():
     panel = (np.abs(before.astype(int) - before[180, 280].astype(int)).sum(axis=2) < 30)
     assert not (changed & panel).any()
     assert (image[sy1 - 6 : sy1 + 60, sx1 - 20 : sx1 + 40] == 40).all()  # the hair is whole
+    # The room to letter in is the balloon's, not the panel's through the
+    # gap (page 11: the translation ran out of a thought balloon).
+    assert not ((balloon.room_mask > 0) & panel).any()
     assert cv2.cvtColor(image[sy0:sy1, sx0 - 30 : sx0 - 2], cv2.COLOR_BGR2GRAY).min() > 150
 
 
@@ -203,6 +206,9 @@ def test_digits_read_for_letters_are_letters_again():
     assert respace("THEPIXOFDR.OCTOPUS! ANDIOWEYOU") == "THE PIX OF DR.OCTOPUS! AND I OWE YOU"
     # The price: a cents sign the OCR read as a letter (the cover's "12¢").
     assert respace("MARVEL COMICS 12t GROUP") == "MARVEL COMICS 12¢ GROUP"
+    # Joined to the next line's word ("12tGROUP"), as lines ending in a
+    # letter are.
+    assert respace(join(["MARVEL", "COMICS", "12t", "GROUP"])) == "MARVEL COMICS 12¢ GROUP"
 
 
 def test_a_line_read_unsure_is_read_again_with_room_around_it(monkeypatch):
@@ -266,6 +272,79 @@ def test_lines_of_balloons_side_by_side_are_not_one_text():
     assert not balloons._linked(left, corner, np.zeros_like(walls))
     under = TextLine((20, 52, 90, 82), "WHAT", 1.0)
     assert balloons._linked(left, under, np.zeros_like(walls))
+
+
+def test_lines_not_parallel_are_not_one_text():
+    """A sound effect lettered slanted next to a balloon, on the panel the
+    balloon's region leaks into ("BR-I-I-NG" under "THERE'S THE PHONE!",
+    page 13): a text's lines are parallel."""
+    from doc_translator.images.ocr import TextLine
+
+    walls = np.zeros((300, 700), np.uint8)
+    line = TextLine((256, 100, 608, 131), "THERE'S THE PHONE!", 1.0)
+    effect = TextLine((549, 151, 650, 213), "BR-I-I-NG", 1.0, angle=-17.9, height=34)
+    assert not balloons._linked(line, effect, walls)
+    assert balloons._linked(line, TextLine((549, 151, 650, 213), "BR-I-I-NG", 1.0, angle=-3.0, height=34), walls)
+
+
+def test_a_line_across_two_balloons_touching_is_cut_between_them(monkeypatch):
+    """Two thought balloons touching, their outlines meeting on one row: the
+    OCR reads that row as one line ("AND THE ATOMIC POWER MY STRENGTH! I'LL",
+    page 12), which joined the two texts. It is cut between their columns,
+    each half read again, and each goes to its own text."""
+    from doc_translator.images.ocr import TextLine
+
+    monkeypatch.setattr(ocr, "read_line", lambda crop: ("HALF", 0.95))
+    left = [TextLine((100, 30 * i, 300, 30 * i + 28), f"LEFT {i}", 1.0) for i in (0, 1, 3, 4)]
+    right = [TextLine((400, 30 * i, 600, 30 * i + 28), f"RIGHT {i}", 1.0) for i in (0, 1, 3, 4)]
+    across = TextLine((100, 60, 600, 88), "LEFT 2 RIGHT 2", 1.0)
+    image = np.full((200, 700, 3), 255, np.uint8)
+    walls = np.zeros((200, 700), np.uint8)
+    assert len(balloons._groups([*left, *right, across], walls)) == 1
+    texts = balloons._columns(image, [*left, *right, across], walls)
+    assert len(texts) == 2
+    for text in texts:
+        assert len(text) == 5
+        assert max(line.box[2] for line in text) <= 350 or min(line.box[0] for line in text) >= 350
+    # A line as wide as a balloon's others (its text is one column) stays.
+    one = [TextLine((100, 30 * i, 600, 30 * i + 28), f"LINE {i}", 1.0) for i in range(5)]
+    assert balloons._columns(image, one, walls) == [one]
+
+
+def test_a_caption_on_a_panels_frame_is_lettering():
+    """A caption on the page's background, right on a panel's frame ("AND,
+    NOT FAR AWAY...", page 3): the frame's straight lines are not art."""
+    from doc_translator.images.ocr import TextLine
+
+    line = TextLine((100, 100, 400, 138), "AND, NOT FAR AWAY...", 1.0)
+    walls = np.zeros((400, 600), np.uint8)
+    walls[150:155, 60:560] = 255  # the panel's frame under it
+    walls[150:400, 420:425] = 255  # and beside it
+    region = walls == 0
+    region[100:138, 100:400] = False  # its letters
+    assert balloons._flat_around(line, region, [line], walls)
+    art = walls.copy()
+    art[139:158, 110:260] = 255  # a block of art as near, as long as a frame
+    assert not balloons._flat_around(line, art == 0, [line], art)
+
+
+def test_a_letter_set_apart_at_a_lines_end_is_read(monkeypatch):
+    """The OCR's box can leave out a line's first letter when it is lettered
+    larger ("LATER" read "ATER", page 14) or apart ("I NEVER", page 6): read
+    again with it, the letters it adds are taken; the line as read stays."""
+    from doc_translator.images.ocr import TextLine
+
+    image = np.full((120, 700, 3), 255, np.uint8)
+    cv2.rectangle(image, (90, 38), (104, 82), (0, 0, 0), -1)  # the "L"
+    line = TextLine((110, 40, 600, 80), "ATER,ATTHESCHOOL", 0.97)
+    monkeypatch.setattr(ocr, "read_line", lambda crop: ("LATEr,AT THE SChOOL", 0.75))
+    widened = ocr._widened(image, line, [line])
+    assert widened.text == "LATER,ATTHESCHOOL"
+    assert widened.box[0] == 90
+    # A frame's line beside it is no letter.
+    framed = np.full((120, 700, 3), 255, np.uint8)
+    cv2.rectangle(framed, (90, 0), (94, 119), (0, 0, 0), -1)
+    assert ocr._widened(framed, line, [line]) is line
 
 
 def test_the_lines_of_a_row_are_read_left_to_right():

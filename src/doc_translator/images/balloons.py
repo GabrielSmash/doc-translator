@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
+from . import ocr
 from .ocr import TextLine
 
 # Pixels darker than this are letters and outlines: walls of the flood.
@@ -199,14 +200,15 @@ def find(image: np.ndarray, lines: list[TextLine]) -> list[Balloon]:
             # The page's background, or a panel's: text written on it with
             # nothing around ("FANTASY! THRILLS!", a caption in the margin)
             # is open text, the rest is over the art.
-            own = [line for line in own if _flat_around(line, whole, lines) and _lettered(line.text)]
+            own = [line for line in own if _flat_around(line, whole, lines, walls) and _lettered(line.text)]
             if not own:
                 continue
         # One region can hold several texts: balloons touching each other,
         # a thought balloon whose outline has gaps under a caption (page 6),
         # a cover's sky under its blurbs. Each text gets the part of the
         # region on its side.
-        groups = _groups(own, _walls_in(image, whole, walls) if region.get("colored") else walls)
+        region_walls = _walls_in(image, whole, walls) if region.get("colored") else walls
+        groups = [part for group in _groups(own, region_walls) for part in _columns(image, group, region_walls)]
         for group in groups:
             inside = whole.copy()
             for other in groups:
@@ -253,10 +255,12 @@ def _lettered(text: str) -> bool:
     return len(letters_) >= LETTERED_MIN and sum(c.isupper() for c in letters_) >= LETTERED_SHARE * len(letters_)
 
 
-def _flat_around(line: TextLine, region: np.ndarray, lines: list[TextLine]) -> bool:
+def _flat_around(line: TextLine, region: np.ndarray, lines: list[TextLine], walls: np.ndarray) -> bool:
     """Whether `region` holds nearly all of a ring half a line height wide
-    around the line, text lines left out: the line is on it with no art
-    nearby."""
+    around the line, text lines and frames left out: the line is on it
+    with no art nearby. A caption on the page's background can sit right
+    on a panel's frame ("AND SO...", pages 3 and 7): straight lines
+    FRAME_LENGTH line heights long are frames, not art."""
     x0, y0, x1, y1 = line.box
     reach = int(line.letter_height / 2)
     ring = np.zeros_like(region)
@@ -264,7 +268,29 @@ def _flat_around(line: TextLine, region: np.ndarray, lines: list[TextLine]) -> b
     for other in lines:
         ox0, oy0, ox1, oy1 = other.box
         ring[max(0, oy0) : oy1, max(0, ox0) : ox1] = False
+    # Frames are looked for a frame's length around the ring.
+    length = max(3, int(FRAME_LENGTH * line.letter_height))
+    height, width = region.shape
+    fx0, fy0 = max(0, x0 - reach - length), max(0, y0 - reach - length)
+    fx1, fy1 = min(width, x1 + reach + length), min(height, y1 + reach + length)
+    crop = walls[fy0:fy1, fx0:fx1]
+    # Thin: a block of art as long is not a frame.
+    thick = max(2, int(FRAME_THICKNESS * line.letter_height))
+    straight = np.zeros_like(crop)
+    for along, across in (((1, length), (thick, 1)), ((length, 1), (1, thick))):
+        lines_ = cv2.morphologyEx(crop, cv2.MORPH_OPEN, np.ones(along, np.uint8))
+        straight |= lines_ & ~cv2.morphologyEx(lines_, cv2.MORPH_OPEN, np.ones(across, np.uint8))
+    # With the antialiased pixels along them.
+    ring[fy0:fy1, fx0:fx1] &= cv2.dilate(straight, np.ones((FRAME_EDGE, FRAME_EDGE), np.uint8)) == 0
     return bool(ring.any()) and np.count_nonzero(region & ring) >= FLAT_AROUND * np.count_nonzero(ring)
+
+
+# A dark straight line this many line heights long is a frame (a panel's,
+# a caption's); its edges are this many pixels wide.
+FRAME_LENGTH = 3
+FRAME_EDGE = 5
+# A frame is thinner than this share of a line height.
+FRAME_THICKNESS = 0.3
 
 
 def _holds(box: tuple[int, int, int, int], inner: tuple[int, int, int, int]) -> bool:
@@ -282,12 +308,16 @@ LINE_GAP = 1.0
 WALLED = 0.6
 # Lines one under the other share this share of the narrower one's width.
 MIN_SHARED = 0.25
+# Lines whose slants differ by more than this, in degrees, are not one
+# text: on the comic, a balloon's lines differ by 4 at most.
+NOT_PARALLEL = 8.0
 
 
-def _groups(lines: list[TextLine], walls: np.ndarray) -> list[list[TextLine]]:
+def _groups(lines: list[TextLine], walls: np.ndarray, apart: tuple[TextLine, ...] = ()) -> list[list[TextLine]]:
     """`lines` in texts: a line is in the text of a line just above it
     (they overlap across, nothing but the balloon's inside between them)
-    or beside it on the same row."""
+    or beside it on the same row. Lines in `apart` are not linked to each
+    other."""
     lines = sorted(lines, key=lambda l: (l.box[1], l.box[0]))
     parent = list(range(len(lines)))
 
@@ -298,7 +328,7 @@ def _groups(lines: list[TextLine], walls: np.ndarray) -> list[list[TextLine]]:
         return i
 
     for (i, a), (j, b) in itertools.combinations(enumerate(lines), 2):
-        if _linked(a, b, walls):
+        if not (a in apart and b in apart) and _linked(a, b, walls):
             parent[root(j)] = root(i)
     texts: dict[int, list[TextLine]] = {}
     for i, line in enumerate(lines):
@@ -306,7 +336,54 @@ def _groups(lines: list[TextLine], walls: np.ndarray) -> list[list[TextLine]]:
     return list(texts.values())
 
 
+def _columns(image: np.ndarray, lines: list[TextLine], walls: np.ndarray) -> list[list[TextLine]]:
+    """`lines`, one text, in the texts it is made of when one of its lines
+    runs across two others side by side: the OCR reads a row of two
+    balloons touching each other as one line where their outlines meet
+    ("...ATOMIC POWER" and "MY STRENGTH!...", page 12), and that line joins
+    them. It is cut halfway between them, and each half read again."""
+    for line in lines:
+        rest = [other for other in lines if other is not line]
+        x0, y0, x1, y1 = line.box
+        reach = LINE_GAP * (y1 - y0)
+        for a, b in itertools.combinations(_groups(rest, walls), 2):
+            left, right = sorted((_box(a), _box(b)))
+            if (
+                min(len(a), len(b)) < MIN_COLUMN
+                or not x0 < left[2] < right[0] < x1
+                # Next to both, above, below or beside.
+                or any(max(box[1] - y1, y0 - box[3]) > reach for box in (left, right))
+            ):
+                continue
+            if halves := _halves(image, line, (left[2] + right[0]) // 2):
+                texts = _groups(rest + halves, walls, apart=tuple(halves))
+                return [part for text in texts for part in _columns(image, text, walls)]
+    return [lines]
+
+
+# Texts side by side a line is cut between have this many lines each.
+MIN_COLUMN = 2
+
+
+def _halves(image: np.ndarray, line: TextLine, cut: int) -> list[TextLine] | None:
+    """`line` cut at `cut` (x), each side read again; None when a side reads
+    nothing."""
+    x0, y0, x1, y1 = line.box
+    room = int((y1 - y0) / 4)
+    halves = []
+    for left, right in ((x0, cut), (cut, x1)):
+        read = ocr.read_line(image[max(0, y0 - room) : y1 + room, max(0, left) : right])
+        if read is None:
+            return None
+        halves.append(TextLine((left, y0, right, y1), read[0], read[1], line.angle, line.height))
+    return halves
+
+
 def _linked(a: TextLine, b: TextLine, walls: np.ndarray) -> bool:
+    # A text's lines are parallel; a sound effect lettered across the art
+    # next to a balloon is not (page 13's "BR-I-I-NG", 18 degrees).
+    if abs(a.angle - b.angle) > NOT_PARALLEL:
+        return False
     (ax0, ay0, ax1, ay1), (bx0, by0, bx1, by1) = a.box, b.box
     height = max(ay1 - ay0, by1 - by0)
     if min(ay1, by1) - max(ay0, by0) > height / 2:  # the same row
@@ -367,7 +444,11 @@ def _balloon(image: np.ndarray, lines: list[TextLine], inside: np.ndarray) -> Ba
         # region there, not the text's box (whose corners cross it).
         reach = int(balloon.line_height)
         around = np.zeros_like(inside)
-        around[max(0, ty0 - reach) : ty1 + reach, max(0, tx0 - reach) : tx1 + reach] = True
+        ax0, ay0, ax1, ay1 = max(0, tx0 - reach), max(0, ty0 - reach), tx1 + reach, ty1 + reach
+        # Of the balloon's color: a light panel around it is in its region
+        # too, through the gaps of its outline (a thought balloon's, page 11).
+        crop = image[ay0:ay1, ax0:ax1].astype(np.int16)
+        around[ay0:ay1, ax0:ax1] = np.abs(crop - np.array(balloon.color, np.int16)).max(axis=2) <= COLOR_TOLERANCE
         balloon.room_mask = _solid(inside & around)
     else:
         balloon.mask = _solid(inside)

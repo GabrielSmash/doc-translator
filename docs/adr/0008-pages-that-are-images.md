@@ -457,3 +457,38 @@ NÃO É", "MINHA COSTAS").
   LanguageTool's spelling suggestion is taken when it is a dictionary word
   one letter away ("VILÃO"). A suggestion further away is another word
   ("REINSERTADO" is not "REINSERÇÃO").
+
+### Revision: texts left out or joined on the whole comic
+
+The whole comic, run with every check, showed six texts read wrong. Each
+had a cause shared by other texts; each rule was checked on all 25 pages,
+and changed only the texts it was made for.
+
+- **A caption on a panel's frame** ("AND, NOT FAR AWAY...", "AND SO...")
+  is on the page's background, and lettering there is read only with no
+  art around it. The frame's straight line counted as art. Thin straight
+  lines three line heights long are frames, left out of that test; a block
+  of art as long is not thin.
+- **Two balloons touching** where their outlines meet on one row: the OCR
+  read that row across both ("...ATOMIC POWER MY STRENGTH! I'LL"), and the
+  line joined the two texts into one balloon; the other was left blank. A
+  line running across two texts side by side, each of two lines or more,
+  is cut between them, and each half is read again and goes to its own
+  text.
+- **A sound effect beside a balloon** ("BR-I-I-NG", 18 degrees) was joined
+  to the balloon's text, through the panel its region leaks into. A text's
+  lines are parallel: on the comic they differ by 4 degrees at most.
+  Lines differing by more than 8 are not one text.
+- **The room of an open balloon** ran onto the panel around it (a thought
+  balloon whose outline has gaps, on a light panel), and the translation
+  was lettered out of the balloon. The room is now the balloon's own color
+  near its text.
+- **A letter set apart at a line's end** ("LATER" read "ATER": the
+  caption's first letter is lettered larger; "I NEVER", "I HAD TO") was
+  left out of the OCR's box. A letter-sized shape next to a line's end,
+  on its row and in no other line, widens the box. Read again wider, the
+  line is read less surely ("SChOOL"), so only the letters added at its
+  end are taken.
+- **The price** ("12t" for "12¢") was joined to the next line's word
+  ("12tGROUP") before it was read as a price; it is now read as one after
+  the spaces are put back.

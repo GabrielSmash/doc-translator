@@ -99,6 +99,7 @@ def translate_pages(doc: pymupdf.Document, pages: list[int], translator: Transla
         if written:
             typeset.prepare(page)
         for balloon, unit, translation in written:
+            log.debug("Page %d: %r -> %r", page.number + 1, unit.text, translation.text)
             spans = locate(unit.segments, translation.segments, translation.text)
             result.emphasized += len(spans)
             result.emphasis_lost += [segment for segment, span in zip(unit.segments, spans) if span is None]
