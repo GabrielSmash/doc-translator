@@ -492,3 +492,32 @@ and changed only the texts it was made for.
 - **The price** ("12t" for "12¢") was joined to the next line's word
   ("12tGROUP") before it was read as a price; it is now read as one after
   the spaces are put back.
+
+### Revision: translations that say something else
+
+Twice in seven pages the local model wrote a fluent translation of
+something the balloon does not say: the cover's "AMERICA'S MOST EXCITING
+SUPER-HERO CAPTURED BY THE WORLD'S MOST DREADED SUPER-VILLAIN!" became "A
+MAIS FAMOSA ESTAÇÃO DE RÁDIO DO MUNDO!", and "AW, SHADDUP! WHOEVER
+EXPECTED SPIDER-MAN TO BUTT IN!" got the next balloon's translation. Every
+check looks at the form (English left, grammar, invented words, numbers),
+and both passed.
+
+- **The reference:** the fast engine (Opus-MT, already a dependency, run
+  on the CPU) translates every balloon once, the glossary's names kept.
+  Its style is poor, but it does not change the subject.
+- **The test:** the share of the reference's content words (accents
+  folded, their first four letters, function words and kept names left
+  out) the translation has. Below 25%, on references of three words or
+  more, it says something else. On the seven pages, the two invented
+  translations shared 0% and 12%; the good ones, 29% or more.
+- **Then:** translated again with what it said named, then alone with a
+  short prompt; a candidate is taken when it shares enough and has no
+  grave problem. A candidate may not leave words in English the first
+  translated, unless the reference keeps them too: the reference can
+  differ by a name alone ("HOMEM-ARANHA" for the "SPIDER-MAN" the model
+  keeps), and a retry then kept "SUPER-THRILLER" where the first had
+  "ROMANCE". Failing that, the translation sharing the most is kept, with
+  a warning.
+- Only comics: on documents the 4b model's translations were not seen to
+  drift, and the check was not measured there.

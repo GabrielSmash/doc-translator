@@ -34,6 +34,8 @@ class FakeLLM(LLMTranslator):
         self.brief = None  # None: skip the description call
         self.cast = False  # False: skip reading a comic's characters
         self.grammar = None  # no LanguageTool in tests
+        self._references = {}
+        self.reference = None  # no fast engine in tests: {source: translation}
         self.spelling = None  # no dictionary download in tests
 
     def _load_spelling(self):
@@ -47,6 +49,16 @@ class FakeLLM(LLMTranslator):
 
     def _load_grammar(self):
         return self.grammar
+
+    def _load_reference(self, glossary):
+        if self.reference is None:
+            return None
+
+        class Reference:
+            def translate(inner, texts):
+                return [self.reference.get(t, t) for t in texts]
+
+        return Reference()
 
     def _cast(self, texts):
         return super()._cast(texts) if self.cast else ""
@@ -796,3 +808,62 @@ def test_balloons_see_the_story_around_them():
     assert "Text that follows" in first and "Line number 13 of" in first.split("Text that follows")[1]
     preceding = second.split("Preceding text")[1].split("Translate")[0]
     assert all(f"Line number {n} of" in preceding for n in range(10))
+
+
+def test_a_translation_saying_something_else_is_translated_again():
+    """The fast engine's translation is poor but on the subject; the local
+    model's said something else ("THE WORLD'S MOST DREADED SUPER-VILLAIN" ->
+    "A MAIS FAMOSA ESTAÇÃO DE RÁDIO DO MUNDO"): told what it said, the model
+    translates what the text says."""
+    source = "America's most exciting super-hero captured by the world's most dreaded super-villain!"
+    invented = "A mais famosa estação de rádio do mundo!"
+    right = "O super-herói mais emocionante da América capturado pelo super-vilão mais temido do mundo!"
+    llm = FakeLLM([json.dumps({"translations": [invented]}), right])
+    llm.reference = {source: "O super-herói mais emocionante da América capturado pelo super-vilão mais temido do mundo!"}
+    result = llm.translate_units([Unit(source, kind="balloon")])
+    assert result[0].text == right
+    assert invented in llm.prompts[-1][0]["content"]
+
+
+def test_a_translation_on_the_subject_is_kept_and_names_tell_nothing():
+    """Words other than the fast engine's are fine ("TEM RAZÃO" for "ESTÁ
+    CERTO"); a balloon given the next one's translation shares only its
+    names with the reference, and is translated again."""
+    from doc_translator.translators.llm import drifted
+
+    stop = EN_PT_BR.target_function_words
+    assert not drifted("Relaxa, Charlie! Provavelmente era só um ratinho.", "Relaxa, Charlie! Deve ter sido só um rato.", stop)
+    assert not drifted("Ele tem razão!", "Ele está certo!", stop)  # too short to tell
+    names = stop | {"spider", "man", "joe"}
+    assert drifted("Olha, Joe! Spider-Man já esteve aqui!", "Aw. Cala a boca! Quem esperava Spider Man para se meter!", names)
+    source, invented = "Aw, shaddup! Whoever expected Spider-Man to butt in!", "Olha, Joe! Spider-Man já esteve aqui!"
+    llm = FakeLLM(
+        [json.dumps({"translations": [invented]}), "Cala a boca! Quem esperava que o Spider-Man se metesse!"],
+        Glossary(keep=["Spider-Man"]),
+    )
+    llm.reference = {source: "Cala a boca! Quem esperava que Spider-Man se intrometesse!"}
+    assert llm.translate_units([Unit(source, kind="balloon")])[0].text.startswith("Cala a boca!")
+
+
+def test_documents_are_not_compared_with_the_fast_engine():
+    llm = FakeLLM([json.dumps({"translations": ["Algo bem diferente aqui."]})])
+    llm.reference = {"The super-hero is captured.": "O super-herói é capturado."}
+    assert llm.translate_units([Unit("The super-hero is captured.")])[0].text == "Algo bem diferente aqui."
+
+
+def test_a_retry_for_the_meaning_may_not_leave_words_untranslated():
+    """The reference can differ by a name alone ("HOMEM-ARANHA" for the
+    "SPIDER-MAN" the model keeps): the caption was taken to say something
+    else. A retry leaving in English words the first translated, and the
+    reference too, is not taken."""
+    source = "A book-length super-thriller! Spider-Man faces his most powerful foe!"
+    first = "Um romance de tamanho livro! Spider-Man enfrenta seu maior inimigo!"
+    llm = FakeLLM(
+        [
+            json.dumps({"translations": [first]}),
+            "Um romance gráfico de book-length! Spider-Man enfrenta seu inimigo mais poderoso!",
+            "Um book-length! Spider-Man enfrenta seu inimigo mais poderoso!",
+        ]
+    )
+    llm.reference = {source: "Um super-suspense de longa-metragem! Homem-Aranha enfrenta seu inimigo mais poderoso!"}
+    assert llm.translate_units([Unit(source, kind="balloon")])[0].text == first

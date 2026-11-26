@@ -17,8 +17,10 @@ import hashlib
 import json
 import logging
 import re
+import unicodedata
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from ..languages import EN_PT_BR, LanguagePair
 from ..spelling import Spelling, source_spelling, spelling
@@ -199,6 +201,9 @@ class LLMTranslator:
         self._progress = None
         self._comic = False
         self._grammar = None
+        # The fast engine's translation of each balloon: what it is about
+        # (ADR 0008).
+        self._references: dict[str, str] = {}
         self._brief = ""
         self._names = ""
         self._kept_words: set[str] = set()
@@ -248,6 +253,8 @@ class LLMTranslator:
         self._spelling = self._load_spelling()
         self._known = vocabulary(units, self._load_source_spelling(), self._spelling)
         glossary = self._build_glossary(units, kept).merged(kept).merged(self.user_glossary)
+        if self._comic:
+            self._references = self._reference_translations([u.text for u in units if u.kind == "balloon"], glossary)
         # Words of kept names are asked capitalized (_asked).
         self._kept_words = {w.lower() for name in glossary.kept() for w in re.findall(r"[^\W\d_]+", name)}
         for unit in units:
@@ -270,6 +277,30 @@ class LLMTranslator:
 
     def _load_grammar(self):
         return grammar(self.languages)
+
+    def _reference_translations(self, texts: list[str], glossary: Glossary) -> dict[str, str]:
+        """Each text translated by the fast engine (Opus-MT), its names kept.
+        Its style is poor, but it does not change the subject: the local model
+        did ("THE WORLD'S MOST DREADED SUPER-VILLAIN" -> "A MAIS FAMOSA ESTAÇÃO
+        DE RÁDIO DO MUNDO"), or gave a balloon the next one's translation."""
+        texts = list(dict.fromkeys(t for t in texts if has_words(t)))
+        if not texts or (engine := self._load_reference(glossary)) is None:
+            return {}
+        log.info("Translating the balloons with the fast engine too: each translation must say what it says")
+        return dict(zip(texts, engine.translate(texts)))
+
+    def _load_reference(self, glossary: Glossary):
+        try:
+            from huggingface_hub import snapshot_download
+
+            from .opus import OpusTranslator
+
+            model_dir = Path(snapshot_download(self.languages.opus_model))
+            # On the CPU: the GPU holds the local model.
+            return OpusTranslator(model_dir, "cpu", Glossary(keep=glossary.kept()), self.languages)
+        except Exception as error:  # no model, no download: the check is skipped
+            log.warning("Fast engine unavailable (%s): translations not compared with it", error)
+            return None
 
     def _load_spelling(self) -> Spelling | None:
         return spelling(self.languages)
@@ -571,11 +602,49 @@ class LLMTranslator:
                         translation = respelled
                 if problems := _problems(text, translation, glossary, self._known, self._spelling):
                     log.warning("Check translation of %r (%s): %r", text[:50], problems, translation[:80])
+            previous = (context + texts[:index])[-self._context_units :]
+            if (reference := self._references.get(text)) and translation:
+                translation = self._faithful(text, translation, reference, previous, glossary)
             if self._grammar is not None and translation:
-                previous = (context + texts[:index])[-self._context_units :]
                 translation = self._grammatical(text, translation, previous, glossary)
             results.append(translation or text)
         return results
+
+    def _faithful(self, text: str, translation: str, reference: str, previous: list[str], glossary: Glossary) -> str:
+        """`translation`, or one saying what the source says when it shares
+        almost no words with the fast engine's `reference`: translated again
+        with what it said named, then alone with a short prompt. A candidate
+        is taken when it shares enough and has no grave problem; failing
+        that, the one sharing the most."""
+        # Names are in both, whatever the rest says.
+        stop = self.languages.target_function_words | {_fold(w) for w in self._kept_words}
+        if not drifted(translation, reference, stop):
+            return translation
+        candidates = [translation]
+        # A candidate may not leave in the source language words the first
+        # one translated, unless the reference keeps them too ("SUPER-HERÓI"):
+        # the reference can differ on a name only ("HOMEM-ARANHA" for the
+        # "SPIDER-MAN" the model keeps), and a retry then left words in
+        # English where the first had translated them.
+        copied = copied_words(text, translation) | copied_words(text, reference)
+        attempts = (
+            lambda: self._translate_one(text, previous, glossary, drift=translation),
+            lambda: self._translate_plain(text, glossary),
+        )
+        for attempt in attempts:
+            candidate = attempt()
+            log.debug("Meaning, candidate for %r: %r", text[:50], candidate)
+            if not candidate or not copied_words(text, candidate) <= copied:
+                continue
+            if not drifted(candidate, reference, stop) and _severity(
+                text, candidate, glossary, self._known, self._spelling
+            ) < PLAIN_SEVERITY:
+                log.debug("Meaning: %r -> %r", translation, candidate)
+                return candidate
+            candidates.append(candidate)
+        best = max(candidates, key=lambda t: shared_share(t, reference, stop))
+        log.warning("Check translation of %r (says something else than %r): %r", text[:50], reference[:60], best[:80])
+        return best
 
     def _grammatical(self, text: str, translation: str, previous: list[str], glossary: Glossary) -> str:
         """`translation` without the grammar errors LanguageTool finds in it:
@@ -648,6 +717,7 @@ class LLMTranslator:
         invented: list[str] | None = None,
         profane: list[str] | None = None,
         grammar: list[str] | None = None,
+        drift: str | None = None,
     ) -> str:
         prompt = self._prompt(f"Translate this text:\n{self._asked(text)}", [text], context, glossary)
         if terms := glossary.relevant(text, self.languages.source):
@@ -684,6 +754,11 @@ class LLMTranslator:
             prompt[0]["content"] += (
                 f"\n- A previous translation had these {self.languages.target} grammar errors; "
                 "write it without them: " + "; ".join(grammar)
+            )
+        if drift:
+            prompt[0]["content"] += (
+                f"\n- A previous translation said something the text does not say: \"{drift}\". "
+                "Translate what the text says."
             )
         translation = _clean(self._chat(prompt, max_tokens=64 + len(text)), text)
         return self._match_case(text, translation)
@@ -937,6 +1012,44 @@ def _severity(
 ) -> int:
     """0 for a translation that looks fine; higher is worse."""
     return _check(source, translation, glossary, known, words)[0]
+
+
+# A translation sharing less than this share of the words of the fast
+# engine's (folded, their first STEM letters, function words left out) says
+# something else. On the comic, the two that did shared 0% and 20%; good
+# translations, 29% or more. Checked on references of this many words.
+REFERENCE_SHARE = 0.25
+REFERENCE_WORDS = 3
+STEM = 4
+
+
+def _fold(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", text.lower()) if not unicodedata.combining(c))
+
+
+def _content_words(text: str, function_words: frozenset[str]) -> set[str]:
+    return {w[:STEM] for w in re.findall(r"[a-z]{3,}", _fold(text)) if w not in function_words}
+
+
+def shared_share(translation: str, reference: str, function_words: frozenset[str] = frozenset()) -> float:
+    """The share of the reference's content words the translation has."""
+    expected = _content_words(reference, function_words)
+    return len(expected & _content_words(translation, function_words)) / len(expected) if expected else 1.0
+
+
+def copied_words(source: str, translation: str) -> set[str]:
+    """Words of `translation` (three letters or more) written as in
+    `source`: names, and words left untranslated."""
+    written = {w for w in re.findall(r"[^\W\d_]{3,}", source.lower())}
+    return {w for w in re.findall(r"[^\W\d_]{3,}", translation.lower()) if w in written}
+
+
+def drifted(translation: str, reference: str, function_words: frozenset[str] = frozenset()) -> bool:
+    """Whether `translation` says something else than the fast engine's
+    `reference` translation of the same text."""
+    if len(_content_words(reference, function_words)) < REFERENCE_WORDS:
+        return False
+    return shared_share(translation, reference, function_words) < REFERENCE_SHARE
 
 
 # A translation this bad after the retries is translated once more alone

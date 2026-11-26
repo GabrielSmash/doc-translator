@@ -57,6 +57,10 @@ class LanguagePair:
     # Abbreviations the target language writes its own way ("USA" ->
     # "EUA"): not dropped when the translation has them so.
     translated_abbreviations: tuple[tuple[str, str], ...] = ()
+    # Words of the target language too common to tell what a text is about
+    # ("para", "isso", "você"): left out when a translation is compared
+    # with the fast engine's (ADR 0008).
+    target_function_words: frozenset[str] = frozenset()
     # Profanity: in a translation whose source has none, the model changed
     # the register ("BIG DEAL!" -> "QUE BOSTA!"). Regular expressions of
     # whole words.
@@ -115,6 +119,15 @@ Boot Loader => KEEP""",
         "https://languagetool.org/download/LanguageTool-6.6.zip",
         "53600506b399bb5ffe1e4c8dec794fd378212f14aaf38ccef9b6f89314d11631",
     ),
+    target_function_words=frozenset({
+        "que", "nao", "sim", "para", "por", "com", "mas", "como", "mais", "menos", "isso", "isto",
+        "esse", "essa", "este", "esta", "aquele", "aquela", "aqui", "ali", "voce", "voces", "ele",
+        "ela", "eles", "elas", "nos", "meu", "minha", "meus", "minhas", "seu", "sua", "seus", "suas",
+        "dele", "dela", "deles", "estou", "esta", "estao", "sou", "sao", "ser", "foi", "era", "tem",
+        "ter", "tenho", "uma", "umas", "uns", "dos", "das", "nas", "pelo", "pela", "pelos", "pelas",
+        "muito", "muita", "quando", "entao", "tambem", "agora", "ate", "sobre", "nada", "tudo",
+        "ainda", "so", "vai", "vou", "pode", "posso", "qual", "quem", "onde", "porque", "num", "numa",
+    }),
     source_profanity=(r"shit\w*", r"fuck\w*", r"damn\w*", "hell", r"bitch\w*", r"bastards?", "ass", "crap", r"piss\w*"),
     target_profanity=(
         "bosta", "merda", "porra", r"caralh\w*", r"fod\w+", r"puta?s?", "cacete", "cu", r"desgraç\w*",
