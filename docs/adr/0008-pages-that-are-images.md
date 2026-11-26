@@ -521,3 +521,24 @@ and both passed.
   a warning.
 - Only comics: on documents the 4b model's translations were not seen to
   drift, and the check was not measured there.
+
+### Revision: characters' names kept as written
+
+The user's decision: names stay as the original writes them ("SPIDER-MAN",
+"HUMAN TORCH", "FANTASTIC FOUR"). Left to the model, a run kept them in one
+balloon and translated them in another ("O FOGO DO TORCEDOR", "TORCIDA" for
+"TORCH").
+
+- The cast sheet (read from the whole comic first) gives each character's
+  name, the other names the text calls them by, and whether the name is a
+  proper name: a role ("the governor", "the security police") is
+  translated. Kept, "THE GOVERNOR" was "O GOVERNOR".
+- Each name is kept as the text writes it, an article before it left out
+  ("the Torch"); the OCR's forms ("SPIDER MAN", "DR.OCTOPUS") are written
+  as the sheet does ("SPIDER-MAN").
+- The sheet lists a short form in one run and not in the next: the last
+  word of a name, used alone after "the" ("THE TORCH'S LECTURE"), is kept
+  too.
+- A retry for the meaning is taken only when no worse by the other checks
+  than the first: one said what the balloon says and translated the name
+  kept ("HOMEM-ARANHA").

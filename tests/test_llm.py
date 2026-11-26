@@ -35,6 +35,7 @@ class FakeLLM(LLMTranslator):
         self.cast = False  # False: skip reading a comic's characters
         self.grammar = None  # no LanguageTool in tests
         self._references = {}
+        self._cast_names = []
         self.reference = None  # no fast engine in tests: {source: translation}
         self.spelling = None  # no dictionary download in tests
 
@@ -743,6 +744,31 @@ def test_a_comic_is_read_whole_for_its_characters_first(monkeypatch):
     assert "- Aunt May: female; Peter's aunt" in batch and "- Spider-Man: male; the hero" in batch
 
 
+def test_the_characters_names_are_kept_as_the_comic_writes_them():
+    """The names stay in English (the user's decision), whatever the model
+    does in a balloon: it kept "SPIDER-MAN" in one, and wrote "O FOGO DO
+    TORCEDOR" for the Human Torch called "TORCH" in another. The cast
+    sheet's names and the other names it lists are kept, as the OCR read
+    them ("SPIDER MAN"), an article before them left out."""
+    from doc_translator.translators.llm import names_written
+
+    texts = ["Spider Man is a joke!", "The Torch spoke today!", "It's Spider-Man!", "The governor asked."]
+    cast = {"characters": [
+        {"name": "Spider-Man", "gender": "male", "aliases": ["Peter Parker"], "proper_name": True, "about": "the hero"},
+        {"name": "Human Torch", "gender": "male", "aliases": ["the Torch"], "proper_name": True, "about": "a hero"},
+        {"name": "the Governor", "gender": "male", "aliases": [], "proper_name": False, "about": "asks for help"},
+    ]}
+    answer = ["Spider-Man é uma piada!", "O Torch falou hoje!", "É o Spider-Man!", "O governador pediu."]
+    llm = FakeLLM([json.dumps(cast), json.dumps({"translations": answer})])
+    llm.cast = True
+    result = llm.translate_units([Unit(t, kind="balloon") for t in texts])
+    assert [r.text for r in result] == answer  # no retry: the names are as the sheet writes them
+    assert {"spider", "man", "torch"} <= llm._kept_words
+    assert "human" not in llm._kept_words  # not in the text
+    assert "governor" not in llm._kept_words  # a role
+    assert names_written(["Dr. Octopus"], ["DR.OCTOPUS!", "DR. OCTOPUS"]) == {"DR.OCTOPUS": "Dr. Octopus", "DR. OCTOPUS": "Dr. Octopus"}
+
+
 class FakeGrammar:
     """LanguageTool, for the errors given: (wrong words, suggestion)."""
 
@@ -866,4 +892,26 @@ def test_a_retry_for_the_meaning_may_not_leave_words_untranslated():
         ]
     )
     llm.reference = {source: "Um super-suspense de longa-metragem! Homem-Aranha enfrenta seu inimigo mais poderoso!"}
+    assert llm.translate_units([Unit(source, kind="balloon")])[0].text == first
+
+
+def test_a_names_short_form_is_kept_too():
+    from doc_translator.translators.llm import short_forms
+
+    texts = ["They sent the Human Torch!", "Later, at the end of the Torch's lecture..."]
+    assert short_forms(["Human Torch", "Aunt May", "Spider-Man"], texts) == ["Torch"]
+    # Only the full name in the texts: no short form.
+    assert short_forms(["Human Torch"], ["They sent the Human Torch!"]) == []
+
+
+def test_a_retry_for_the_meaning_may_not_translate_a_name_kept():
+    """Said again, the balloon's meaning was right but "SPIDER MAN" was
+    "HOMEM-ARANHA": worse by the glossary than the first, it is not taken."""
+    source = "Whoever expected Spider-Man to butt in!"
+    first = "Olha, Joe! Spider-Man já esteve aqui!"
+    llm = FakeLLM(
+        [json.dumps({"translations": [first]}), "Quem esperava que o Homem-Aranha se metesse!", "Quem esperava que o Homem-Aranha interrompesse!"],
+        Glossary(keep=["Spider-Man"]),
+    )
+    llm.reference = {source: "Quem esperava que Spider-Man se intrometesse!"}
     assert llm.translate_units([Unit(source, kind="balloon")])[0].text == first

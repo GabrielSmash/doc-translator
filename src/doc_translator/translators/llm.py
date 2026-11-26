@@ -139,9 +139,12 @@ CAST_PROMPT = """Below is part {part} of {parts} of a comic book's text \
 (speech balloons and captions, in reading order). List its characters, \
 those who appear and those who are named, adding to the list so far: for \
 each, the name as written, the gender ("male", "female", "group" or \
-"unknown"), and in a few words who they are (other names they go by, \
-their role). Keep the entries of the list so far, completing them.
-Answer with {{"characters": [{{"name": "...", "gender": "...", "about": "..."}}]}}.
+"unknown"), the other names the text calls them by, as written (a short \
+form, a nickname, a title with the name), and in a few words who they are \
+(their role), and whether the name is a proper name ("Spider-Man", "Aunt \
+May": true) or only a role or a description ("the governor", "a guard": \
+false). Keep the entries of the list so far, completing them.
+Answer with {{"characters": [{{"name": "...", "gender": "...", "aliases": ["..."], "proper_name": true, "about": "..."}}]}}.
 
 List so far:
 {known}
@@ -204,6 +207,8 @@ class LLMTranslator:
         # The fast engine's translation of each balloon: what it is about
         # (ADR 0008).
         self._references: dict[str, str] = {}
+        # The comic's characters' names, as the cast sheet gives them.
+        self._cast_names: list[str] = []
         self._brief = ""
         self._names = ""
         self._kept_words: set[str] = set()
@@ -252,7 +257,18 @@ class LLMTranslator:
             self._names = f"Names kept as written ({self.languages.source}): " + ", ".join(names)
         self._spelling = self._load_spelling()
         self._known = vocabulary(units, self._load_source_spelling(), self._spelling)
-        glossary = self._build_glossary(units, kept).merged(kept).merged(self.user_glossary)
+        glossary = self._build_glossary(units, kept).merged(kept)
+        if self._cast_names:
+            # As the cast sheet writes them: the OCR's "SPIDER MAN" and
+            # "DR.OCTOPUS" are "SPIDER-MAN" and "DR. OCTOPUS".
+            texts = [u.text for u in units]
+            written = names_written([*self._cast_names, *short_forms(self._cast_names, texts)], texts)
+            keep = [form for form, name in written.items() if form.lower() == name.lower()]
+            terms = {form: name.upper() if form.isupper() else name for form, name in written.items() if form.lower() != name.lower()}
+            log.info("Characters' names kept: %s; written as the cast sheet does: %s", keep, terms)
+            glossary = glossary.merged(Glossary(keep=keep, terms=terms))
+            glossary.keep[:] = [k for k in glossary.keep if k.lower() not in {t.lower() for t in terms}]
+        glossary = glossary.merged(self.user_glossary)
         if self._comic:
             self._references = self._reference_translations([u.text for u in units if u.kind == "balloon"], glossary)
         # Words of kept names are asked capitalized (_asked).
@@ -377,9 +393,11 @@ class LLMTranslator:
                         "properties": {
                             "name": {"type": "string"},
                             "gender": {"type": "string", "enum": ["male", "female", "group", "unknown"]},
+                            "aliases": {"type": "array", "items": {"type": "string"}},
+                            "proper_name": {"type": "boolean"},
                             "about": {"type": "string"},
                         },
-                        "required": ["name", "gender", "about"],
+                        "required": ["name", "gender", "aliases", "proper_name", "about"],
                     },
                 },
             },
@@ -398,6 +416,17 @@ class LLMTranslator:
                 log.warning("Could not read the comic's characters, part %d (%s)", number, error)
         if not cast:
             return ""
+        # Their names, kept as in the original (the user's decision): the
+        # model kept "SPIDER-MAN" in one balloon, and wrote "O FOGO DO
+        # TORCEDOR" for the Human Torch called "TORCH" in another.
+        # A role is no name: kept, "THE GOVERNOR" was "O GOVERNOR".
+        self._cast_names = [
+            name.strip()
+            for c in cast
+            if c.get("proper_name", True) is not False
+            for name in [c["name"], *(c.get("aliases") or [])]
+            if isinstance(name, str) and name.strip()
+        ]
         sheet = "Characters (words for each agree with their gender):\n" + "\n".join(_cast_line(c) for c in cast)
         log.info("%s", sheet.replace("\n", "; "))
         return sheet
@@ -627,6 +656,9 @@ class LLMTranslator:
         # "SPIDER-MAN" the model keeps), and a retry then left words in
         # English where the first had translated them.
         copied = copied_words(text, translation) | copied_words(text, reference)
+        # Nor be worse by the other checks: a retry said what the balloon
+        # says, and translated the name kept ("HOMEM-ARANHA").
+        severity = _severity(text, translation, glossary, self._known, self._spelling)
         attempts = (
             lambda: self._translate_one(text, previous, glossary, drift=translation),
             lambda: self._translate_plain(text, glossary),
@@ -634,11 +666,13 @@ class LLMTranslator:
         for attempt in attempts:
             candidate = attempt()
             log.debug("Meaning, candidate for %r: %r", text[:50], candidate)
-            if not candidate or not copied_words(text, candidate) <= copied:
+            if (
+                not candidate
+                or not copied_words(text, candidate) <= copied
+                or _severity(text, candidate, glossary, self._known, self._spelling) > severity
+            ):
                 continue
-            if not drifted(candidate, reference, stop) and _severity(
-                text, candidate, glossary, self._known, self._spelling
-            ) < PLAIN_SEVERITY:
+            if not drifted(candidate, reference, stop):
                 log.debug("Meaning: %r -> %r", translation, candidate)
                 return candidate
             candidates.append(candidate)
@@ -702,6 +736,8 @@ class LLMTranslator:
         task = f"Translate into {self.languages.target} this {kind}. Answer with the translation only."
         if names := [name for name in glossary.kept() if name.lower() in text.lower()]:
             task += " Keep these names as written: " + ", ".join(names) + "."
+        if terms := {s: t for s, t in glossary.terms.items() if s.lower() in text.lower()}:
+            task += " Write these terms so: " + "; ".join(f"{s} => {t}" for s, t in terms.items()) + "."
         try:
             answer = self._chat([{"role": "user", "content": f"{task}\n\n{self._asked(text)}"}], max_tokens=64 + len(text))
         except LLMError:
@@ -956,6 +992,46 @@ def _one_edit(a: str, b: str) -> bool:
         return sum(x != y for x, y in zip(a, b)) == 1
     short, long = sorted((a, b), key=len)
     return any(long[:i] + long[i + 1 :] == short for i in range(len(long)))
+
+
+def short_forms(names: list[str], texts: list[str]) -> list[str]:
+    """The last word of a name of several, where the texts use it alone after
+    "the" ("THE TORCH'S LECTURE" for the Human Torch): the name's short
+    form. Asked, the model listed it in one run and not in the next, and
+    "TORCH" was translated ("TORCIDA")."""
+    found = []
+    for name in names:
+        words = re.findall(r"[^\W\d_]+", name)
+        if len(words) < 2 or len(words[-1]) < SHORT_FORM_LETTERS:
+            continue
+        first, last = re.escape(words[-2]), re.escape(words[-1])
+        alone = re.compile(rf"\bthe\s+(?!{first}[\s-]){last}\b", re.I)
+        if any(alone.search(text) for text in texts):
+            found.append(words[-1])
+    return found
+
+
+# A short form is a word this long at least ("TORCH"; not "MAY", "MAN").
+SHORT_FORM_LETTERS = 4
+
+
+def names_written(names: list[str], texts: list[str]) -> dict[str, str]:
+    """How `texts` write each of `names`, and the name: an article before it
+    left out ("the Torch": "TORCH"), a hyphen or a space between its words
+    either way, or none after a period ("SPIDER MAN", "DR.OCTOPUS", as the
+    OCR reads "SPIDER-MAN" and "DR. OCTOPUS"). Names the texts do not have
+    are left out."""
+    found: dict[str, tuple[str, str]] = {}
+    for name in names:
+        name = re.sub(r"^(?:the|a|an)\s+", "", name.strip(), flags=re.I)
+        words = re.findall(r"[^\W_]+(?:['’.][^\W_]+)*\.?", name)
+        if not words:
+            continue
+        pattern = re.compile(r"(?<![\w-])" + r"[\s-]*".join(re.escape(w) for w in words) + r"(?![\w-])", re.I)
+        for text in texts:
+            for match in pattern.finditer(text):
+                found.setdefault(match.group(0).lower(), (match.group(0), name))
+    return dict(found.values())
 
 
 def _cast_line(character: dict) -> str:
