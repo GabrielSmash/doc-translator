@@ -915,3 +915,21 @@ def test_a_retry_for_the_meaning_may_not_translate_a_name_kept():
     )
     llm.reference = {source: "Quem esperava que Spider-Man se intrometesse!"}
     assert llm.translate_units([Unit(source, kind="balloon")])[0].text == first
+
+
+def test_a_thing_the_cast_sheet_calls_a_name_is_translated():
+    """The model listed "THIEVES" and "MOUSE" as characters with proper
+    names: kept, "ERA SÓ UM MOUSE". Words of the language used as things,
+    after "a" or plural, are no names; "CHARLIE", a word too, is one."""
+    from doc_translator.translators.llm import common_nouns
+
+    english = Lowercase({"mouse", "thief", "thieves", "charlie", "torch", "hulk"})
+    texts = [
+        "Relax, Charlie! It was probably just a mouse.",
+        "Mouse? You've never seen a mouse like this before!",
+        "Above the startled thieves...",
+        "The Hulk is here!",
+    ]
+    names = ["Spider-Man", "Charlie", "Mouse", "Thieves", "Hulk", "Joe"]
+    assert common_nouns(names, texts, english) == {"Mouse", "Thieves"}
+    assert common_nouns(names, texts, None) == set()

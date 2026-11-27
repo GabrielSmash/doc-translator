@@ -262,7 +262,8 @@ class LLMTranslator:
             # As the cast sheet writes them: the OCR's "SPIDER MAN" and
             # "DR.OCTOPUS" are "SPIDER-MAN" and "DR. OCTOPUS".
             texts = [u.text for u in units]
-            written = names_written([*self._cast_names, *short_forms(self._cast_names, texts)], texts)
+            names = [n for n in self._cast_names if n not in common_nouns(self._cast_names, texts, self._load_source_spelling())]
+            written = names_written([*names, *short_forms(names, texts)], texts)
             keep = [form for form, name in written.items() if form.lower() == name.lower()]
             terms = {form: name.upper() if form.isupper() else name for form, name in written.items() if form.lower() != name.lower()}
             log.info("Characters' names kept: %s; written as the cast sheet does: %s", keep, terms)
@@ -1008,6 +1009,34 @@ def short_forms(names: list[str], texts: list[str]) -> list[str]:
         alone = re.compile(rf"\bthe\s+(?!{first}[\s-]){last}\b", re.I)
         if any(alone.search(text) for text in texts):
             found.append(words[-1])
+    return found
+
+
+# Words before a noun that make it a thing, not someone: "JUST A MOUSE".
+# English plural endings, and the singular's ("THIEVES": "thief").
+PLURALS = (("ves", "f"), ("ies", "y"), ("es", ""), ("s", ""))
+INDEFINITE = re.compile(r"\b(?:a|an|one|some|any|another)\s+$", re.I)
+
+
+def common_nouns(names: list[str], texts: list[str], source: Spelling | None) -> set[str]:
+    """Names of one word that are words of the source language used as
+    things: after "a" ("JUST A MOUSE") or plural ("THE STARTLED THIEVES").
+    Asked, the model called them proper names; kept, they were "ERA SÓ UM
+    MOUSE". Asked alone, the dictionary cannot tell: it has "charlie" and
+    "hulk", names the texts use as names ("RELAX, CHARLIE!")."""
+    if source is None:
+        return set()
+    found = set()
+    for name in names:
+        word = name.strip().lower()
+        if not re.fullmatch(r"[^\W\d_]+", word) or not source.has(word):
+            continue
+        singular = [word[: -len(end)] + to for end, to in PLURALS if word.endswith(end)]
+        plural = any(len(stem) >= 3 and source.has(stem) for stem in singular)
+        pattern = re.compile(rf"(?<![\w-]){re.escape(word)}(?![\w-])", re.I)
+        after_a = any(INDEFINITE.search(text[: match.start()]) for text in texts for match in pattern.finditer(text))
+        if plural or after_a:
+            found.add(name)
     return found
 
 

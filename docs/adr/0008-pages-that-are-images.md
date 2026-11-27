@@ -542,3 +542,8 @@ balloon and translated them in another ("O FOGO DO TORCEDOR", "TORCIDA" for
 - A retry for the meaning is taken only when no worse by the other checks
   than the first: one said what the balloon says and translated the name
   kept ("HOMEM-ARANHA").
+- The sheet called things characters with proper names ("THIEVES",
+  "MOUSE": "ERA SÓ UM MOUSE"). A name of one word that is a word of the
+  source language is translated when the texts use it as a thing: after
+  "a" ("JUST A MOUSE") or plural. The dictionary alone cannot tell: it has
+  "charlie" and "hulk", which the texts use as names.
