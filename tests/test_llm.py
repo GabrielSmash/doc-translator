@@ -933,3 +933,13 @@ def test_a_thing_the_cast_sheet_calls_a_name_is_translated():
     names = ["Spider-Man", "Charlie", "Mouse", "Thieves", "Hulk", "Joe"]
     assert common_nouns(names, texts, english) == {"Mouse", "Thieves"}
     assert common_nouns(names, texts, None) == set()
+
+
+def test_a_word_the_fast_engine_translates_is_no_name():
+    """ "FELLA" of "DON'T BE SHY, FELLA!" was kept as a name; the fast engine
+    writes it "cara", and keeps "Charlie"."""
+    llm = FakeLLM([])
+    llm._load_source_spelling = lambda: Lowercase({"fella", "charlie", "mouse"})
+    llm.reference = {"Don't be shy, fella!": "Não sejas tímido, cara!", "Relax, Charlie!": "Relaxa, Charlie!"}
+    texts = ["Don't be shy, fella!", "Relax, Charlie!", "It was just a mouse."]
+    assert llm._things(["Fella", "Charlie", "the Mouse", "Spider-Man"], texts) == {"Fella", "the Mouse"}

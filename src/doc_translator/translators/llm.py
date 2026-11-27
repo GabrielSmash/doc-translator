@@ -262,7 +262,8 @@ class LLMTranslator:
             # As the cast sheet writes them: the OCR's "SPIDER MAN" and
             # "DR.OCTOPUS" are "SPIDER-MAN" and "DR. OCTOPUS".
             texts = [u.text for u in units]
-            names = [n for n in self._cast_names if n not in common_nouns(self._cast_names, texts, self._load_source_spelling())]
+            things = self._things(self._cast_names, texts)
+            names = [n for n in self._cast_names if n not in things]
             written = names_written([*names, *short_forms(names, texts)], texts)
             keep = [form for form, name in written.items() if form.lower() == name.lower()]
             terms = {form: name.upper() if form.isupper() else name for form, name in written.items() if form.lower() != name.lower()}
@@ -294,6 +295,28 @@ class LLMTranslator:
 
     def _load_grammar(self):
         return grammar(self.languages)
+
+    def _things(self, names: list[str], texts: list[str]) -> set[str]:
+        """The names of `names` that are things, not someone: words of the
+        source language used as things (`common_nouns`), or that the fast
+        engine translates in every text that has them ("FELLA" of "DON'T BE
+        SHY, FELLA!" is "cara"; "CHARLIE" stays "Charlie")."""
+        source = self._load_source_spelling()
+        found = common_nouns(names, texts, source)
+        words = {n: w for n in names if n not in found and (w := _one_word(n)) and source is not None and source.has(w)}
+        if not words:
+            return found
+        patterns = {n: re.compile(rf"(?<![\w-]){re.escape(w)}(?![\w-])", re.I) for n, w in words.items()}
+        asked = list(dict.fromkeys(t for t in texts for p in patterns.values() if p.search(t)))
+        if not asked or (engine := self._load_reference(Glossary())) is None:
+            return found
+        translated = dict(zip(asked, engine.translate(asked)))
+        for name, pattern in patterns.items():
+            if not any(pattern.search(translated[t]) for t in asked if pattern.search(t)):
+                found.add(name)
+        if found:
+            log.info("Named as characters but translated as things: %s", sorted(found))
+        return found
 
     def _reference_translations(self, texts: list[str], glossary: Glossary) -> dict[str, str]:
         """Each text translated by the fast engine (Opus-MT), its names kept.
@@ -1028,8 +1051,7 @@ def common_nouns(names: list[str], texts: list[str], source: Spelling | None) ->
         return set()
     found = set()
     for name in names:
-        word = name.strip().lower()
-        if not re.fullmatch(r"[^\W\d_]+", word) or not source.has(word):
+        if not (word := _one_word(name)) or not source.has(word):
             continue
         singular = [word[: -len(end)] + to for end, to in PLURALS if word.endswith(end)]
         plural = any(len(stem) >= 3 and source.has(stem) for stem in singular)
@@ -1038,6 +1060,13 @@ def common_nouns(names: list[str], texts: list[str], source: Spelling | None) ->
         if plural or after_a:
             found.add(name)
     return found
+
+
+def _one_word(name: str) -> str:
+    """`name` in lowercase when it is one word, an article and marks around
+    it left out ("the Mouse", "Mouse?"); else ""."""
+    word = re.sub(r"^(?:the|a|an)\s+", "", name.strip(), flags=re.I).strip(" .,;:!?'\"").lower()
+    return word if re.fullmatch(r"[^\W\d_]+", word) else ""
 
 
 # A short form is a word this long at least ("TORCH"; not "MAY", "MAN").

@@ -547,3 +547,7 @@ balloon and translated them in another ("O FOGO DO TORCEDOR", "TORCIDA" for
   source language is translated when the texts use it as a thing: after
   "a" ("JUST A MOUSE") or plural. The dictionary alone cannot tell: it has
   "charlie" and "hulk", which the texts use as names.
+- A word the texts use only as a name of address ("DON'T BE SHY, FELLA!")
+  shows neither: the fast engine (already used for the meaning check) is
+  asked the texts that have it, with no names kept; a word it translates
+  in all of them ("cara") is no name, one it keeps ("Charlie") is.
